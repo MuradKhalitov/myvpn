@@ -114,7 +114,11 @@ class ThreeXUiProvisioningIntegrationTest {
         ThreeXUiInboundClient inboundClient = new ThreeXUiInboundClient(
                 webClient, objectMapper, urlFactory, sessionManager, properties);
         ThreeXUiVpnProvider provider = new ThreeXUiVpnProvider(
-                inboundClient, new UnsupportedVpnConfigurationFactory(), properties);
+                inboundClient,
+                new ThreeXUiVlessConfigurationFactory(),
+                new ThreeXUiConfigurationMapper(
+                        objectMapper, properties, () -> "/fixedSpiderPath"),
+                properties);
         SubscriptionService service = new SubscriptionServiceImpl(
                 administratorId -> { },
                 subscriptionRepository,
@@ -194,6 +198,7 @@ class ThreeXUiProvisioningIntegrationTest {
         return new ThreeXUiProperties(
                 URI.create(server.baseUrl()), WEB_PATH,
                 "test-user", "test-password", INBOUND_ID,
+                "vpn.example.test", null,
                 Duration.ofSeconds(1), Duration.ofSeconds(1),
                 3, 8, Duration.ZERO, Duration.ZERO);
     }

@@ -5,4 +5,10 @@ public record ThreeXUiApiResponse<T>(
         String msg,
         T obj
 ) {
+
+    @Override
+    public String toString() {
+        return "ThreeXUiApiResponse[success=" + success
+                + ", messageRedacted=true, objectRedacted=true]";
+    }
 }

@@ -24,6 +24,11 @@ public record ThreeXUiVlessClient(
         @JsonProperty("created_at") Long createdAt,
         @JsonProperty("updated_at") Long updatedAt
 ) {
+    @Override
+    public String toString() {
+        return "ThreeXUiVlessClient[redacted]";
+    }
+
     public ThreeXUiVlessClient withExpiryTime(long newExpiryTime) {
         return new ThreeXUiVlessClient(
                 id, security, password, flow, auth, email, limitIp, totalGB,

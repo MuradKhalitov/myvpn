@@ -10,4 +10,10 @@ public record ThreeXUiInboundResponse(
         String settings,
         String streamSettings
 ) {
+
+    @Override
+    public String toString() {
+        return "ThreeXUiInboundResponse[inboundPresent=true, "
+                + "settingsRedacted=true, streamSettingsRedacted=true]";
+    }
 }

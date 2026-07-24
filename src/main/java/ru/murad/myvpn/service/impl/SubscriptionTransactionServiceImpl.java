@@ -128,7 +128,7 @@ public class SubscriptionTransactionServiceImpl
                 .subscription(subscription)
                 .providerName(provisioned.providerName())
                 .externalAccessId(provisioned.externalAccessId())
-                .configurationData(provisioned.configurationData())
+                .configurationData(configurationForPersistence(provisioned))
                 .status(VpnAccessStatus.ACTIVE)
                 .issuedAt(now)
                 .createdAt(now)
@@ -157,7 +157,7 @@ public class SubscriptionTransactionServiceImpl
                 .subscription(subscription)
                 .providerName(provisioned.providerName())
                 .externalAccessId(provisioned.externalAccessId())
-                .configurationData(provisioned.configurationData())
+                .configurationData(configurationForPersistence(provisioned))
                 .status(VpnAccessStatus.ACTIVE)
                 .issuedAt(now)
                 .createdAt(now)
@@ -362,5 +362,10 @@ public class SubscriptionTransactionServiceImpl
         if (subscription.getStatus() != expected) {
             throw new IllegalStateException("Subscription state changed concurrently");
         }
+    }
+
+    private String configurationForPersistence(ProvisionedVpnAccess provisioned) {
+        return "3X_UI".equals(provisioned.providerName())
+                ? null : provisioned.configurationData();
     }
 }

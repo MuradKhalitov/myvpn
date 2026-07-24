@@ -12,6 +12,8 @@ public record ThreeXUiProperties(
         String username,
         String password,
         int inboundId,
+        String publicHost,
+        Integer publicPortOverride,
         Duration connectTimeout,
         Duration readTimeout,
         int maxMutationAttempts,
@@ -19,4 +21,28 @@ public record ThreeXUiProperties(
         Duration retryInitialDelay,
         Duration retryMaxDelay
 ) {
+
+    @Override
+    public String toString() {
+        return "ThreeXUiProperties["
+                + "configured=" + isConfigured()
+                + ", baseUrlRedacted=true"
+                + ", webBasePathRedacted=true"
+                + ", usernameRedacted=true"
+                + ", passwordRedacted=true"
+                + ", inboundIdPresent=" + (inboundId > 0)
+                + ", publicHostRedacted=true"
+                + ", publicPortOverridePresent="
+                + (publicPortOverride != null)
+                + "]";
+    }
+
+    private boolean isConfigured() {
+        return baseUrl != null
+                && webBasePath != null && !webBasePath.isBlank()
+                && username != null && !username.isBlank()
+                && password != null && !password.isBlank()
+                && inboundId > 0
+                && publicHost != null && !publicHost.isBlank();
+    }
 }

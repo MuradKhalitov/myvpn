@@ -15,4 +15,12 @@ public record SubscriptionDto(
         String providerName,
         String configurationData
 ) {
+
+    @Override
+    public String toString() {
+        return "SubscriptionDto[id=" + id
+                + ", telegramId=" + telegramId
+                + ", status=" + status
+                + ", configurationData=redacted]";
+    }
 }

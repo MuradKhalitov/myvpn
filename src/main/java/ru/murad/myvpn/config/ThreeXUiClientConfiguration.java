@@ -8,6 +8,7 @@ import org.springframework.web.reactive.function.client.WebClient;
 import reactor.netty.http.client.HttpClient;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import ru.murad.myvpn.exception.ThreeXUiException;
+import ru.murad.myvpn.client.PublicVpnHost;
 
 @Configuration
 @ConditionalOnProperty(name = "vpn.provider.type", havingValue = "3x-ui")
@@ -29,6 +30,11 @@ public class ThreeXUiClientConfiguration {
         if (properties.username() == null || properties.username().isBlank()
                 || properties.password() == null || properties.password().isBlank()
                 || properties.inboundId() <= 0
+                || properties.publicHost() == null
+                || properties.publicHost().isBlank()
+                || properties.publicPortOverride() != null
+                && (properties.publicPortOverride() < 1
+                || properties.publicPortOverride() > 65535)
                 || properties.connectTimeout() == null
                 || properties.connectTimeout().isNegative()
                 || properties.readTimeout() == null
@@ -40,6 +46,11 @@ public class ThreeXUiClientConfiguration {
                 || properties.retryInitialDelay().isNegative()
                 || properties.retryMaxDelay() == null
                 || properties.retryMaxDelay().isNegative()) {
+            throw new ThreeXUiException("Invalid 3x-ui configuration");
+        }
+        try {
+            new PublicVpnHost(properties.publicHost());
+        } catch (ThreeXUiException exception) {
             throw new ThreeXUiException("Invalid 3x-ui configuration");
         }
     }

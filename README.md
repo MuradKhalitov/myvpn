@@ -65,12 +65,37 @@ $env:THREEXUI_WEB_BASE_PATH = "/hidden-path"
 $env:THREEXUI_USERNAME = "<username>"
 $env:THREEXUI_PASSWORD = "<password>"
 $env:THREEXUI_INBOUND_ID = "123"
+$env:THREEXUI_PUBLIC_HOST = "vpn.example.com"
+$env:THREEXUI_PUBLIC_PORT_OVERRIDE = ""
 $env:THREEXUI_MAX_MUTATION_ATTEMPTS = "3"
 $env:THREEXUI_MAX_REQUESTS_PER_OPERATION = "8"
 ```
 
 `THREEXUI_BASE_URL` must contain only the scheme and authority. Put the hidden
 panel path only in `THREEXUI_WEB_BASE_PATH`.
+
+`THREEXUI_PUBLIC_HOST` is mandatory for the real provider and must identify
+the public VPN endpoint, not the panel. The optional port override replaces
+the inbound port only when explicitly configured. It must contain only a
+hostname, IPv4 address, or IPv6 address. Do not include a scheme, port, path,
+query, or fragment. Set the public port separately:
+
+```env
+THREEXUI_PUBLIC_HOST=vpn.example.com
+THREEXUI_PUBLIC_HOST=203.0.113.10
+THREEXUI_PUBLIC_HOST=2001:db8::1
+THREEXUI_PUBLIC_PORT_OVERRIDE=443
+```
+
+For example, `THREEXUI_PUBLIC_HOST=vpn.example.com:443` is invalid. IPv6 may
+be supplied with or without brackets. Schemed values such as
+`https://vpn.example.com`, IPv6 zone identifiers such as `fe80::1%eth0`,
+unspecified addresses `0.0.0.0` and `::`, and IPv4 octets with leading zeroes
+are rejected.
+
+Private and loopback hosts are allowed for local and development deployments.
+Hostnames must use ASCII labels; configure an IDN in its ASCII-compatible
+punycode form.
 
 TLS verification is always enabled. For a panel certificate signed by a private
 CA, import that CA into a dedicated Java truststore and pass it to the JVM:
@@ -82,8 +107,16 @@ keytool -importcert -alias three-x-ui -file panel-ca.crt `
 $env:JAVA_TOOL_OPTIONS = "-Djavax.net.ssl.trustStore=three-x-ui-truststore.p12 -Djavax.net.ssl.trustStorePassword=<password>"
 ```
 
-The current adapter manages client creation, expiry updates, and deletion. It
-does not yet construct or return a VLESS URI for real 3x-ui access.
+The current adapter manages client creation, expiry updates, and deletion. For
+confirmed VLESS + Reality + TCP clients it builds a VLESS URI from the public
+inbound settings and returns it only as the provisioning result. The real URI
+is not persisted in PostgreSQL. Other transports and security modes are
+rejected until they have dedicated, tested configuration factories.
+
+For Reality links the adapter follows the 3x-ui `v2.9.1` subscription
+generator: `spx` is a fresh slash-prefixed, 15-character cryptographically
+random alphanumeric path. A server-side `spiderX` value is not copied into the
+client configuration.
 
 3x-ui `v2.9.1` refuses to delete the last client of an inbound. The configured
 inbound must therefore always contain at least one unmanaged service client.

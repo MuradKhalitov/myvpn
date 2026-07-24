@@ -18,7 +18,6 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -39,6 +38,7 @@ class ThreeXUiVpnProviderTest {
 
     @Mock private ThreeXUiInboundClient inboundClient;
     @Mock private VpnConfigurationFactory configurationFactory;
+    @Mock private ThreeXUiConfigurationMapper configurationMapper;
 
     private ThreeXUiVpnProvider provider;
 
@@ -50,6 +50,8 @@ class ThreeXUiVpnProviderTest {
                 "test-user",
                 "test-password",
                 42,
+                "vpn.example.test",
+                null,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(10),
                 3,
@@ -57,7 +59,7 @@ class ThreeXUiVpnProviderTest {
                 Duration.ZERO,
                 Duration.ZERO);
         provider = new ThreeXUiVpnProvider(
-                inboundClient, configurationFactory, properties);
+                inboundClient, configurationFactory, configurationMapper, properties);
     }
 
     @Test
@@ -67,12 +69,12 @@ class ThreeXUiVpnProviderTest {
         when(inboundClient.getInbound(any())).thenReturn(inbound);
         when(inboundClient.parseSettings(inbound))
                 .thenReturn(new ThreeXUiInboundSettings(List.of(client)));
-        when(configurationFactory.create(inbound, client)).thenReturn(Optional.empty());
+        stubConfiguration(inbound);
 
         ProvisionedVpnAccess result = provider.provision(provisionRequest());
 
         assertThat(result.externalAccessId()).isEqualTo(SUBSCRIPTION_ID.toString());
-        assertThat(result.configurationData()).isNull();
+        assertThat(result.configurationData()).isEqualTo("vless://generated");
         verify(inboundClient, never()).addClient(any(), any());
     }
 
@@ -88,7 +90,7 @@ class ThreeXUiVpnProviderTest {
         when(inboundClient.parseSettings(after))
                 .thenReturn(new ThreeXUiInboundSettings(List.of(client)));
         when(inboundClient.serializeSettings(any())).thenReturn("serialized-settings");
-        when(configurationFactory.create(after, client)).thenReturn(Optional.empty());
+        stubConfiguration(after);
 
         provider.provision(provisionRequest());
 
@@ -111,7 +113,7 @@ class ThreeXUiVpnProviderTest {
         when(inboundClient.parseSettings(recovered))
                 .thenReturn(new ThreeXUiInboundSettings(List.of(client)));
         when(inboundClient.serializeSettings(any())).thenReturn("settings");
-        when(configurationFactory.create(recovered, client)).thenReturn(Optional.empty());
+        stubConfiguration(recovered);
         doThrow(new ThreeXUiRetryableException("temporary"))
                 .when(inboundClient).addClient(any(), any());
 
@@ -235,5 +237,15 @@ class ThreeXUiVpnProviderTest {
     private ThreeXUiVlessClient client(long expiryTime) {
         return ThreeXUiVlessClient.create(
                 SUBSCRIPTION_ID.toString(), "test-email", expiryTime);
+    }
+
+    private void stubConfiguration(ThreeXUiInboundResponse inbound) {
+        VlessConfigurationData data = new VlessConfigurationData(
+                SUBSCRIPTION_ID.toString(), "vpn.example.test", 443,
+                "tcp", "reality", "none", "", "server.example",
+                "chrome", "public-key", "abcd", "/", "MyVPN");
+        when(configurationMapper.map(inbound, SUBSCRIPTION_ID.toString()))
+                .thenReturn(data);
+        when(configurationFactory.create(data)).thenReturn("vless://generated");
     }
 }

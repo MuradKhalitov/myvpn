@@ -5,4 +5,10 @@ public record ProvisionedVpnAccess(
         String externalAccessId,
         String configurationData
 ) {
+
+    @Override
+    public String toString() {
+        return "ProvisionedVpnAccess[providerName=" + providerName
+                + ", externalAccessId=redacted, configurationData=redacted]";
+    }
 }

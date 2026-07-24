@@ -6,4 +6,9 @@ public record VpnExtensionRequest(
         String externalAccessId,
         Instant expiresAt
 ) {
+
+    @Override
+    public String toString() {
+        return "VpnExtensionRequest[redacted]";
+    }
 }

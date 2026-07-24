@@ -49,6 +49,7 @@ class ThreeXUiUrlFactoryTest {
     private ThreeXUiProperties properties(URI baseUrl, String webPath) {
         return new ThreeXUiProperties(
                 baseUrl, webPath, "user", "password", 42,
+                "vpn.example.test", null,
                 Duration.ofSeconds(5), Duration.ofSeconds(10), 3,
                 8,
                 Duration.ofSeconds(1), Duration.ofSeconds(8));

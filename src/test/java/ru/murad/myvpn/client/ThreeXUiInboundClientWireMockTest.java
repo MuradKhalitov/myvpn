@@ -391,7 +391,10 @@ class ThreeXUiInboundClientWireMockTest {
                 .willReturn(aResponse().withStatus(503)));
         ThreeXUiVpnProvider provider = new ThreeXUiVpnProvider(
                 client,
-                new UnsupportedVpnConfigurationFactory(),
+                new ThreeXUiVlessConfigurationFactory(),
+                new ThreeXUiConfigurationMapper(
+                        new ObjectMapper(), properties(),
+                        () -> "/fixedSpiderPath"),
                 properties());
 
         assertThatThrownBy(() -> provider.provision(new VpnProvisionRequest(
@@ -421,17 +424,81 @@ class ThreeXUiInboundClientWireMockTest {
                                 + "\"email\":\"test\",\"enable\":true,"
                                 + "\"expiryTime\":12345}]"))));
 
-        provider(8).provision(new VpnProvisionRequest(
+        ProvisionedVpnAccess result = provider(8).provision(new VpnProvisionRequest(
                 java.util.UUID.fromString(
                         "10000000-0000-0000-0000-000000000001"),
                 1L,
                 java.time.Instant.ofEpochMilli(12345)));
 
+        assertThat(result.configurationData()).startsWith("vless://");
         server.verify(1, postRequestedFor(urlEqualTo(WEB_PATH + "/login")));
         server.verify(2, getRequestedFor(urlEqualTo(inboundPath())));
         server.verify(1, postRequestedFor(
                 urlEqualTo(WEB_PATH + "/panel/api/inbounds/addClient")));
         assertThat(server.getAllServeEvents()).hasSize(4);
+    }
+
+    @Test
+    void existingClientMustProduceConfigurationWithoutAddMutation() {
+        String clientId = "10000000-0000-0000-0000-000000000011";
+        stubLogin(COOKIE);
+        server.stubFor(get(urlEqualTo(inboundPath()))
+                .willReturn(json(inboundResponse("vless",
+                        "[{\"id\":\"" + clientId + "\",\"email\":\"test\","
+                                + "\"enable\":true,\"flow\":\"\","
+                                + "\"expiryTime\":12345}]"))));
+
+        ProvisionedVpnAccess result = provider(8).provision(
+                new VpnProvisionRequest(UUID.fromString(clientId), 1L,
+                        java.time.Instant.ofEpochMilli(12345)));
+
+        assertThat(result.externalAccessId()).isEqualTo(clientId);
+        assertThat(result.configurationData()).startsWith("vless://");
+        server.verify(0, postRequestedFor(
+                urlEqualTo(WEB_PATH + "/panel/api/inbounds/addClient")));
+    }
+
+    @Test
+    void confirmedCreateWithIncompleteRealityDataMustBeUncertainAndNotRepeatMutation() {
+        String clientId = "10000000-0000-0000-0000-000000000012";
+        stubLogin(COOKIE);
+        server.stubFor(get(urlEqualTo(inboundPath()))
+                .inScenario("incomplete-configuration")
+                .whenScenarioStateIs("Started")
+                .willReturn(json(inboundResponse("vless", "[]")))
+                .willSetStateTo("preflight"));
+        server.stubFor(post(urlEqualTo(WEB_PATH + "/panel/api/inbounds/addClient"))
+                .inScenario("incomplete-configuration")
+                .whenScenarioStateIs("preflight")
+                .willReturn(json("{\"success\":true,\"msg\":\"\",\"obj\":null}"))
+                .willSetStateTo("created"));
+        String incompleteStream = """
+                {"network":"tcp","security":"reality","realitySettings":{
+                "serverNames":["server.example"],"shortIds":["abcd"],
+                "privateKey":"PRIVATE_MARKER","settings":{
+                "fingerprint":"chrome","spiderX":"/"}}}""";
+        server.stubFor(get(urlEqualTo(inboundPath()))
+                .inScenario("incomplete-configuration")
+                .whenScenarioStateIs("created")
+                .willReturn(json(inboundResponse("vless",
+                        "[{\"id\":\"" + clientId + "\",\"email\":\"test\","
+                                + "\"enable\":true,\"expiryTime\":12345}]",
+                        incompleteStream))));
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(
+                () -> provider(8).provision(new VpnProvisionRequest(
+                        UUID.fromString(clientId), 1L,
+                        java.time.Instant.ofEpochMilli(12345))));
+
+        assertThat(thrown)
+                .isInstanceOf(ru.murad.myvpn.exception
+                        .ThreeXUiUncertainException.class);
+        java.io.StringWriter stack = new java.io.StringWriter();
+        thrown.printStackTrace(new java.io.PrintWriter(stack));
+        assertThat(stack.toString())
+                .doesNotContain("vless://", clientId, "PRIVATE_MARKER");
+        server.verify(1, postRequestedFor(
+                urlEqualTo(WEB_PATH + "/panel/api/inbounds/addClient")));
     }
 
     @Test
@@ -535,6 +602,8 @@ class ThreeXUiInboundClientWireMockTest {
                 "test-user",
                 "test-password",
                 42,
+                "vpn.example.test",
+                null,
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(1),
                 3,
@@ -547,11 +616,17 @@ class ThreeXUiInboundClientWireMockTest {
         ThreeXUiProperties base = properties();
         ThreeXUiProperties configured = new ThreeXUiProperties(
                 base.baseUrl(), base.webBasePath(), base.username(), base.password(),
-                base.inboundId(), base.connectTimeout(), base.readTimeout(),
+                base.inboundId(), base.publicHost(), base.publicPortOverride(),
+                base.connectTimeout(), base.readTimeout(),
                 base.maxMutationAttempts(), maximumRequests,
                 base.retryInitialDelay(), base.retryMaxDelay());
         return new ThreeXUiVpnProvider(
-                client, new UnsupportedVpnConfigurationFactory(), configured);
+                client,
+                new ThreeXUiVlessConfigurationFactory(),
+                new ThreeXUiConfigurationMapper(
+                        new ObjectMapper(), configured,
+                        () -> "/fixedSpiderPath"),
+                configured);
     }
 
     private String inboundPath() {
@@ -574,6 +649,19 @@ class ThreeXUiInboundClientWireMockTest {
     }
 
     private String inboundResponse(String protocol, String clientsOrSettings) {
+        String streamSettings = """
+                {"network":"tcp","security":"reality","realitySettings":{
+                "serverNames":["server.example"],"shortIds":["abcd"],
+                "privateKey":"PRIVATE_KEY_MUST_BE_IGNORED","settings":{
+                "publicKey":"test-public-key","fingerprint":"chrome","spiderX":"/"}}}""";
+        return inboundResponse(protocol, clientsOrSettings, streamSettings);
+    }
+
+    private String inboundResponse(
+            String protocol,
+            String clientsOrSettings,
+            String streamSettings
+    ) {
         String settings = clientsOrSettings.startsWith("[")
                 ? "{\"clients\":" + clientsOrSettings + "}"
                 : clientsOrSettings;
@@ -581,8 +669,12 @@ class ThreeXUiInboundClientWireMockTest {
                 .replace("\"", "\\\"")
                 .replace("\r", "\\r")
                 .replace("\n", "\\n");
+        String escapedStream = streamSettings.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n");
         return "{\"success\":true,\"msg\":\"\",\"obj\":{\"id\":42,\"port\":443,"
                 + "\"protocol\":\"" + protocol + "\",\"settings\":\"" + escaped
-                + "\",\"streamSettings\":\"{}\"}}";
+                + "\",\"streamSettings\":\"" + escapedStream + "\"}}";
     }
 }

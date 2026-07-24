@@ -30,6 +30,8 @@ vpn:
     username: ${THREEXUI_USERNAME:}
     password: ${THREEXUI_PASSWORD:}
     inbound-id: ${THREEXUI_INBOUND_ID:0}
+    public-host: ${THREEXUI_PUBLIC_HOST:}
+    public-port-override: ${THREEXUI_PUBLIC_PORT_OVERRIDE:}
     connect-timeout: ${THREEXUI_CONNECT_TIMEOUT:5s}
     read-timeout: ${THREEXUI_READ_TIMEOUT:10s}
     max-mutation-attempts: ${THREEXUI_MAX_MUTATION_ATTEMPTS:3}

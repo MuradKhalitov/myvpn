@@ -8,4 +8,9 @@ public record VpnProvisionRequest(
         long telegramId,
         Instant expiresAt
 ) {
+
+    @Override
+    public String toString() {
+        return "VpnProvisionRequest[redacted]";
+    }
 }

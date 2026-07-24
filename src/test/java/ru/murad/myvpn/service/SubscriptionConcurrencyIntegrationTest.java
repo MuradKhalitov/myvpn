@@ -20,6 +20,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.client.VpnProvider;
+import ru.murad.myvpn.client.VpnProvisionRequest;
 import ru.murad.myvpn.model.Subscription;
 import ru.murad.myvpn.model.SubscriptionStatus;
 import ru.murad.myvpn.model.TelegramUser;
@@ -116,6 +117,54 @@ class SubscriptionConcurrencyIntegrationTest {
         }
 
         verify(provider, times(1)).provision(any());
+        assertThat(subscriptionRepository.findById(pending.getId()).orElseThrow()
+                .getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
+    }
+
+    @Test
+    void threeXUiUriMustNotBePersistedAfterNormalProvisionCompletion()
+            throws Exception {
+        Subscription pending = subscription(
+                SubscriptionStatus.PENDING, NOW.minusSeconds(60));
+        String secret = "vless://SECRET_MARKER_NORMAL";
+        VpnProvider provider = mock(VpnProvider.class);
+        when(provider.provision(any())).thenReturn(new ProvisionedVpnAccess(
+                "3X_UI", pending.getId().toString(), secret));
+
+        transactionService.completeProvision(
+                pending.getId(),
+                provider.provision(new VpnProvisionRequest(
+                        pending.getId(), pending.getUser().getTelegramId(),
+                        pending.getExpiresAt())),
+                NOW);
+
+        assertPersistedAccessDoesNotContainSecret(
+                pending.getId(), pending.getId().toString(), secret);
+    }
+
+    @Test
+    void threeXUiUriMustNotBePersistedAfterRecoveryCompletion()
+            throws Exception {
+        Subscription pending = subscription(
+                SubscriptionStatus.RECONCILIATION_REQUIRED,
+                NOW.minus(10, ChronoUnit.MINUTES));
+        PendingProvisionCandidate candidate =
+                claim(pending, NOW, "persistence-worker");
+        String secret = "vless://SECRET_MARKER_RECOVERY";
+        VpnProvider provider = mock(VpnProvider.class);
+        when(provider.provision(any())).thenReturn(new ProvisionedVpnAccess(
+                "3X_UI", pending.getId().toString(), secret));
+
+        assertThat(transactionService.completeProvision(
+                pending.getId(),
+                candidate.claimToken(),
+                provider.provision(new VpnProvisionRequest(
+                        pending.getId(), pending.getUser().getTelegramId(),
+                        pending.getExpiresAt())),
+                NOW)).isTrue();
+
+        assertPersistedAccessDoesNotContainSecret(
+                pending.getId(), pending.getId().toString(), secret);
         assertThat(subscriptionRepository.findById(pending.getId()).orElseThrow()
                 .getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
     }
@@ -523,6 +572,39 @@ class SubscriptionConcurrencyIntegrationTest {
                         WHERE table_schema='%s' AND table_name='subscriptions'
                           AND column_name='status'
                         """.formatted(schema))).isEqualTo("32");
+            }
+        }
+    }
+
+    private void assertPersistedAccessDoesNotContainSecret(
+            UUID subscriptionId,
+            String expectedExternalId,
+            String secret
+    ) throws Exception {
+        try (var connection = java.sql.DriverManager.getConnection(
+                POSTGRESQL.getJdbcUrl(),
+                POSTGRESQL.getUsername(),
+                POSTGRESQL.getPassword());
+             var statement = connection.prepareStatement("""
+                     SELECT provider_name, external_access_id,
+                            configuration_data, status
+                     FROM vpn_accesses
+                     WHERE subscription_id = ?
+                     """)) {
+            statement.setObject(1, subscriptionId);
+            try (var result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("provider_name")).isEqualTo("3X_UI");
+                assertThat(result.getString("external_access_id"))
+                        .isEqualTo(expectedExternalId);
+                assertThat(result.getString("configuration_data")).isNull();
+                assertThat(result.getString("status")).isEqualTo("ACTIVE");
+                for (String column : List.of(
+                        "provider_name", "external_access_id", "status")) {
+                    assertThat(result.getString(column))
+                            .doesNotContain("vless://", secret);
+                }
+                assertThat(result.next()).isFalse();
             }
         }
     }

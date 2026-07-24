@@ -11,4 +11,9 @@ public record ThreeXUiInboundSettings(
     public ThreeXUiInboundSettings {
         clients = clients == null ? List.of() : List.copyOf(clients);
     }
+
+    @Override
+    public String toString() {
+        return "ThreeXUiInboundSettings[clientsRedacted=true]";
+    }
 }

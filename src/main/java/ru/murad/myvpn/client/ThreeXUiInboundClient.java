@@ -342,11 +342,17 @@ public class ThreeXUiInboundClient {
         }
     }
 
-    private record RawResponse(
+    static record RawResponse(
             HttpStatusCode status,
             String location,
             MediaType contentType,
             String body
     ) {
+
+        @Override
+        public String toString() {
+            return "RawResponse[status=" + status
+                    + ", locationRedacted=true, bodyRedacted=true]";
+        }
     }
 }

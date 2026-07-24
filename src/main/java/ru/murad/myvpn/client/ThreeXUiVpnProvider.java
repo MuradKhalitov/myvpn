@@ -25,15 +25,18 @@ public class ThreeXUiVpnProvider implements VpnProvider {
 
     private final ThreeXUiInboundClient inboundClient;
     private final VpnConfigurationFactory configurationFactory;
+    private final ThreeXUiConfigurationMapper configurationMapper;
     private final ThreeXUiProperties properties;
 
     public ThreeXUiVpnProvider(
             ThreeXUiInboundClient inboundClient,
             VpnConfigurationFactory configurationFactory,
+            ThreeXUiConfigurationMapper configurationMapper,
             ThreeXUiProperties properties
     ) {
         this.inboundClient = inboundClient;
         this.configurationFactory = configurationFactory;
+        this.configurationMapper = configurationMapper;
         this.properties = properties;
     }
 
@@ -235,9 +238,16 @@ public class ThreeXUiVpnProvider implements VpnProvider {
             ThreeXUiInboundResponse inbound,
             ThreeXUiVlessClient client
     ) {
-        return new ProvisionedVpnAccess(
-                PROVIDER_NAME,
-                client.id(),
-                configurationFactory.create(inbound, client).orElse(null));
+        try {
+            String configuration = configurationFactory.create(
+                    configurationMapper.map(inbound, client.id()));
+            if (configuration == null || configuration.isBlank()) {
+                throw new ThreeXUiException("Incomplete VLESS configuration");
+            }
+            return new ProvisionedVpnAccess(
+                    PROVIDER_NAME, client.id(), configuration);
+        } catch (RuntimeException exception) {
+            throw new ThreeXUiUncertainException();
+        }
     }
 }
