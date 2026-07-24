@@ -11,3 +11,6 @@ spring:
     open-in-view: false
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
+
+telegram:
+  admin-ids: ${TELEGRAM_ADMIN_IDS:}

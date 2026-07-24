@@ -1,0 +1,61 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-create-subscriptions-and-vpn-accesses
+      author: myvpn
+      changes:
+        - createTable:
+            tableName: subscriptions
+            columns:
+              - column: { name: id, type: uuid, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: user_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: tariff_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: status, type: varchar(16), constraints: { nullable: false } }
+              - column: { name: starts_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: expires_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: activated_by_telegram_id, type: bigint, constraints: { nullable: false } }
+              - column: { name: activated_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: created_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: updated_at, type: "timestamp with time zone", constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            baseTableName: subscriptions
+            baseColumnNames: user_id
+            referencedTableName: telegram_users
+            referencedColumnNames: id
+            constraintName: fk_subscriptions_user
+        - addForeignKeyConstraint:
+            baseTableName: subscriptions
+            baseColumnNames: tariff_id
+            referencedTableName: vpn_tariffs
+            referencedColumnNames: id
+            constraintName: fk_subscriptions_tariff
+        - createIndex:
+            tableName: subscriptions
+            indexName: idx_subscriptions_user_status
+            columns:
+              - column: { name: user_id }
+              - column: { name: status }
+        - sql:
+            sql: >
+              CREATE UNIQUE INDEX uk_subscriptions_active_user
+              ON subscriptions (user_id)
+              WHERE status = 'ACTIVE'
+        - createTable:
+            tableName: vpn_accesses
+            columns:
+              - column: { name: id, type: uuid, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: subscription_id, type: uuid, constraints: { nullable: false, unique: true, uniqueConstraintName: uk_vpn_accesses_subscription } }
+              - column: { name: provider_name, type: varchar(32), constraints: { nullable: false } }
+              - column: { name: external_access_id, type: varchar(128), constraints: { nullable: false, unique: true, uniqueConstraintName: uk_vpn_accesses_external_id } }
+              - column: { name: configuration_data, type: text }
+              - column: { name: status, type: varchar(16), constraints: { nullable: false } }
+              - column: { name: issued_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: revoked_at, type: "timestamp with time zone" }
+              - column: { name: configuration_deleted_at, type: "timestamp with time zone" }
+              - column: { name: created_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: updated_at, type: "timestamp with time zone", constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            baseTableName: vpn_accesses
+            baseColumnNames: subscription_id
+            referencedTableName: subscriptions
+            referencedColumnNames: id
+            constraintName: fk_vpn_accesses_subscription
