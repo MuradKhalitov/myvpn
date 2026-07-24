@@ -1,0 +1,128 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-create-vpn-tariffs
+      author: myvpn
+      changes:
+        - createTable:
+            tableName: vpn_tariffs
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: code
+                  type: varchar(50)
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uk_vpn_tariffs_code
+              - column:
+                  name: name
+                  type: varchar(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: varchar(500)
+              - column:
+                  name: duration_days
+                  type: integer
+                  constraints:
+                    nullable: false
+              - column:
+                  name: price
+                  type: numeric(19,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: currency
+                  type: varchar(3)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: active
+                  type: boolean
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+        - sql:
+            sql: >
+              ALTER TABLE vpn_tariffs
+              ADD CONSTRAINT chk_vpn_tariffs_duration_positive
+              CHECK (duration_days > 0)
+        - sql:
+            sql: >
+              ALTER TABLE vpn_tariffs
+              ADD CONSTRAINT chk_vpn_tariffs_price_non_negative
+              CHECK (price >= 0)
+        - createIndex:
+            tableName: vpn_tariffs
+            indexName: idx_vpn_tariffs_active
+            columns:
+              - column:
+                  name: active
+        - insert:
+            tableName: vpn_tariffs
+            columns:
+              - column: { name: id, value: "10000000-0000-0000-0000-000000000001" }
+              - column: { name: code, value: "MONTH_1" }
+              - column: { name: name, value: "1 месяц" }
+              - column: { name: description, value: "VPN-доступ на 30 дней" }
+              - column: { name: duration_days, valueNumeric: 30 }
+              - column: { name: price, valueNumeric: 90.00 }
+              - column: { name: currency, value: "RUB" }
+              - column: { name: active, valueBoolean: true }
+              - column: { name: created_at, value: "2026-07-24 00:00:00+00" }
+              - column: { name: updated_at, value: "2026-07-24 00:00:00+00" }
+        - insert:
+            tableName: vpn_tariffs
+            columns:
+              - column: { name: id, value: "10000000-0000-0000-0000-000000000003" }
+              - column: { name: code, value: "MONTH_3" }
+              - column: { name: name, value: "3 месяца" }
+              - column: { name: description, value: "VPN-доступ на 90 дней" }
+              - column: { name: duration_days, valueNumeric: 90 }
+              - column: { name: price, valueNumeric: 240.00 }
+              - column: { name: currency, value: "RUB" }
+              - column: { name: active, valueBoolean: true }
+              - column: { name: created_at, value: "2026-07-24 00:00:00+00" }
+              - column: { name: updated_at, value: "2026-07-24 00:00:00+00" }
+        - insert:
+            tableName: vpn_tariffs
+            columns:
+              - column: { name: id, value: "10000000-0000-0000-0000-000000000006" }
+              - column: { name: code, value: "MONTH_6" }
+              - column: { name: name, value: "6 месяцев" }
+              - column: { name: description, value: "VPN-доступ на 180 дней" }
+              - column: { name: duration_days, valueNumeric: 180 }
+              - column: { name: price, valueNumeric: 420.00 }
+              - column: { name: currency, value: "RUB" }
+              - column: { name: active, valueBoolean: true }
+              - column: { name: created_at, value: "2026-07-24 00:00:00+00" }
+              - column: { name: updated_at, value: "2026-07-24 00:00:00+00" }
+        - insert:
+            tableName: vpn_tariffs
+            columns:
+              - column: { name: id, value: "10000000-0000-0000-0000-000000000012" }
+              - column: { name: code, value: "YEAR_1" }
+              - column: { name: name, value: "1 год" }
+              - column: { name: description, value: "VPN-доступ на 365 дней" }
+              - column: { name: duration_days, valueNumeric: 365 }
+              - column: { name: price, valueNumeric: 720.00 }
+              - column: { name: currency, value: "RUB" }
+              - column: { name: active, valueBoolean: true }
+              - column: { name: created_at, value: "2026-07-24 00:00:00+00" }
+              - column: { name: updated_at, value: "2026-07-24 00:00:00+00" }
