@@ -1,5 +1,5 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/myvpn
+    url: jdbc:postgresql://localhost:5454/myvpn
     username: myvpn
     password: myvpn

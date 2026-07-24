@@ -5,4 +5,6 @@ public interface SubscriptionLifecycleService {
     int revokeExpiredSubscriptions();
 
     int deleteExpiredConfigurations();
+
+    int recoverPendingSubscriptions();
 }

@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-add-subscription-provisioning-states
+      author: myvpn
+      changes:
+        - dropIndex:
+            tableName: subscriptions
+            indexName: uk_subscriptions_active_user
+        - sql:
+            sql: >
+              CREATE UNIQUE INDEX uk_subscriptions_current_user
+              ON subscriptions (user_id)
+              WHERE status IN ('PENDING', 'ACTIVE')

@@ -20,4 +20,9 @@ public class SubscriptionLifecycleScheduler {
     public void deleteExpiredConfigurations() {
         lifecycleService.deleteExpiredConfigurations();
     }
+
+    @Scheduled(fixedDelayString = "${vpn.lifecycle.pending-recovery-delay:60000}")
+    public void recoverPendingSubscriptions() {
+        lifecycleService.recoverPendingSubscriptions();
+    }
 }

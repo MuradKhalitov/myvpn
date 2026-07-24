@@ -24,5 +24,6 @@ target/
 
 ### Local environment and secrets ###
 .env
+.env-*
 application-secrets.yml
 *.log

@@ -11,29 +11,22 @@ import ru.murad.myvpn.client.VpnProvisionRequest;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
 import ru.murad.myvpn.dto.RevokeSubscriptionRequest;
 import ru.murad.myvpn.dto.SubscriptionDto;
-import ru.murad.myvpn.exception.TelegramUserNotFoundException;
-import ru.murad.myvpn.exception.SubscriptionNotFoundException;
 import ru.murad.myvpn.exception.VpnAccessNotFoundException;
-import ru.murad.myvpn.exception.VpnTariffNotFoundException;
+import ru.murad.myvpn.exception.ThreeXUiUncertainException;
 import ru.murad.myvpn.mapper.SubscriptionMapper;
-import ru.murad.myvpn.model.Subscription;
 import ru.murad.myvpn.model.SubscriptionStatus;
-import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.VpnAccess;
-import ru.murad.myvpn.model.VpnAccessStatus;
-import ru.murad.myvpn.model.VpnTariff;
 import ru.murad.myvpn.repository.SubscriptionRepository;
-import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
-import ru.murad.myvpn.repository.VpnTariffRepository;
+import ru.murad.myvpn.service.ActivationPreparation;
 import ru.murad.myvpn.service.AdminAuthorizationService;
 import ru.murad.myvpn.service.SubscriptionService;
+import ru.murad.myvpn.service.SubscriptionTransactionService;
+import ru.murad.myvpn.service.VpnAccessCandidate;
 
 import java.time.Clock;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.Optional;
-import java.util.UUID;
 
 @Service
 @Validated
@@ -41,35 +34,25 @@ import java.util.UUID;
 public class SubscriptionServiceImpl implements SubscriptionService {
 
     private final AdminAuthorizationService adminAuthorizationService;
-    private final TelegramUserRepository userRepository;
-    private final VpnTariffRepository tariffRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final VpnAccessRepository accessRepository;
     private final VpnProvider vpnProvider;
     private final SubscriptionMapper subscriptionMapper;
+    private final SubscriptionTransactionService transactionService;
     private final Clock clock;
 
     @Override
-    @Transactional
     public SubscriptionDto activate(ActivateSubscriptionRequest request) {
         adminAuthorizationService.checkAccess(request.administratorTelegramId());
         Instant now = clock.instant();
-        TelegramUser user = userRepository.findByTelegramId(request.userTelegramId())
-                .orElseThrow(() -> new TelegramUserNotFoundException(request.userTelegramId()));
-        VpnTariff tariff = tariffRepository.findByCodeAndActiveTrue(request.tariffCode())
-                .orElseThrow(() -> new VpnTariffNotFoundException(request.tariffCode()));
+        ActivationPreparation preparation =
+                transactionService.prepareActivation(request, now);
 
-        Optional<Subscription> activeSubscription =
-                subscriptionRepository.findFirstByUserIdAndStatusOrderByExpiresAtDesc(
-                        user.getId(), SubscriptionStatus.ACTIVE);
-
-        if (activeSubscription.isPresent()
-                && activeSubscription.get().getExpiresAt().isAfter(now)) {
-            return extend(activeSubscription.get(), tariff, request.administratorTelegramId(), now);
-        }
-
-        activeSubscription.ifPresent(subscription -> expire(subscription, now));
-        return provision(user, tariff, request.administratorTelegramId(), now);
+        return switch (preparation.type()) {
+            case EXTEND -> extend(preparation, request, now);
+            case REPLACE_EXPIRED -> replaceExpired(preparation, request, now);
+            case PROVISION -> provision(preparation, now);
+        };
     }
 
     @Override
@@ -80,91 +63,70 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                 .findFirstByUserTelegramIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
                         userTelegramId, SubscriptionStatus.ACTIVE, now)
                 .map(subscription -> {
-                    VpnAccess access = findAccess(subscription);
+                    VpnAccess access = accessRepository.findBySubscriptionId(subscription.getId())
+                            .orElseThrow(() ->
+                                    new VpnAccessNotFoundException(subscription.getId()));
                     return subscriptionMapper.toDto(subscription, access);
                 });
     }
 
     @Override
-    @Transactional
     public void revoke(RevokeSubscriptionRequest request) {
         adminAuthorizationService.checkAccess(request.administratorTelegramId());
-        Subscription subscription = subscriptionRepository
-                .findFirstByUserTelegramIdAndStatusOrderByExpiresAtDesc(
-                        request.userTelegramId(), SubscriptionStatus.ACTIVE)
-                .orElseThrow(() -> new SubscriptionNotFoundException(
-                        request.userTelegramId()));
-        Instant now = clock.instant();
-        VpnAccess access = findAccess(subscription);
-        vpnProvider.revoke(access.getExternalAccessId());
-        access.revoke(now);
-        subscription.revoke(now);
-        accessRepository.save(access);
-        subscriptionRepository.save(subscription);
-    }
-
-    private SubscriptionDto extend(
-            Subscription subscription,
-            VpnTariff tariff,
-            long administratorTelegramId,
-            Instant now
-    ) {
-        VpnAccess access = findAccess(subscription);
-        subscription.extend(tariff, administratorTelegramId, now);
-        vpnProvider.extend(new VpnExtensionRequest(
-                access.getExternalAccessId(), subscription.getExpiresAt()));
-        subscriptionRepository.save(subscription);
-        return subscriptionMapper.toDto(subscription, access);
-    }
-
-    private void expire(Subscription subscription, Instant now) {
-        VpnAccess access = findAccess(subscription);
-        vpnProvider.revoke(access.getExternalAccessId());
-        access.revoke(now);
-        subscription.markExpired(now);
-        accessRepository.save(access);
-        subscriptionRepository.saveAndFlush(subscription);
+        VpnAccessCandidate candidate =
+                transactionService.findActiveAccess(request.userTelegramId());
+        vpnProvider.revoke(candidate.externalAccessId());
+        transactionService.completeRevocation(candidate.subscriptionId(), clock.instant());
     }
 
     private SubscriptionDto provision(
-            TelegramUser user,
-            VpnTariff tariff,
-            long administratorTelegramId,
+            ActivationPreparation preparation,
             Instant now
     ) {
-        Subscription subscription = Subscription.builder()
-                .id(UUID.randomUUID())
-                .user(user)
-                .tariff(tariff)
-                .status(SubscriptionStatus.ACTIVE)
-                .startsAt(now)
-                .expiresAt(now.plus(tariff.getDurationDays(), ChronoUnit.DAYS))
-                .activatedByTelegramId(administratorTelegramId)
-                .activatedAt(now)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-        subscriptionRepository.save(subscription);
-
-        ProvisionedVpnAccess provisioned = vpnProvider.provision(new VpnProvisionRequest(
-                subscription.getId(), user.getTelegramId(), subscription.getExpiresAt()));
-        VpnAccess access = VpnAccess.builder()
-                .id(UUID.randomUUID())
-                .subscription(subscription)
-                .providerName(provisioned.providerName())
-                .externalAccessId(provisioned.externalAccessId())
-                .configurationData(provisioned.configurationData())
-                .status(VpnAccessStatus.ACTIVE)
-                .issuedAt(now)
-                .createdAt(now)
-                .updatedAt(now)
-                .build();
-        accessRepository.save(access);
-        return subscriptionMapper.toDto(subscription, access);
+        ProvisionedVpnAccess provisioned;
+        try {
+            provisioned = vpnProvider.provision(
+                    new VpnProvisionRequest(
+                            preparation.subscriptionId(),
+                            preparation.userTelegramId(),
+                            preparation.expiresAt()));
+        } catch (ThreeXUiUncertainException exception) {
+            transactionService.markProvisionReconciliationRequired(
+                    preparation.subscriptionId(), clock.instant());
+            throw exception;
+        } catch (RuntimeException exception) {
+            transactionService.markProvisionFailed(
+                    preparation.subscriptionId(), clock.instant());
+            throw exception;
+        }
+        return transactionService.completeProvision(
+                preparation.subscriptionId(), provisioned, now);
     }
 
-    private VpnAccess findAccess(Subscription subscription) {
-        return accessRepository.findBySubscriptionId(subscription.getId())
-                .orElseThrow(() -> new VpnAccessNotFoundException(subscription.getId()));
+    private SubscriptionDto extend(
+            ActivationPreparation preparation,
+            ActivateSubscriptionRequest request,
+            Instant now
+    ) {
+        vpnProvider.extend(new VpnExtensionRequest(
+                preparation.existingExternalAccessId(), preparation.expiresAt()));
+        return transactionService.completeExtension(
+                preparation.subscriptionId(),
+                request.tariffCode(),
+                request.administratorTelegramId(),
+                preparation.expiresAt(),
+                now);
+    }
+
+    private SubscriptionDto replaceExpired(
+            ActivationPreparation preparation,
+            ActivateSubscriptionRequest request,
+            Instant now
+    ) {
+        vpnProvider.revoke(preparation.existingExternalAccessId());
+        transactionService.completeExpiration(preparation.subscriptionId(), now);
+        ActivationPreparation replacement =
+                transactionService.prepareActivation(request, clock.instant());
+        return provision(replacement, clock.instant());
     }
 }

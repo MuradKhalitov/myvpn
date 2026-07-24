@@ -1,10 +1,16 @@
 package ru.murad.myvpn.client;
 
 import org.springframework.stereotype.Component;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 import java.util.UUID;
 
 @Component
+@ConditionalOnProperty(
+        name = "vpn.provider.type",
+        havingValue = "fake",
+        matchIfMissing = true
+)
 public class FakeVpnProvider implements VpnProvider {
 
     private static final String PROVIDER_NAME = "FAKE";

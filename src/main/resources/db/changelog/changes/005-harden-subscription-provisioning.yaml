@@ -1,0 +1,71 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-harden-subscription-provisioning
+      author: myvpn
+      changes:
+        - modifyDataType:
+            tableName: subscriptions
+            columnName: status
+            newDataType: varchar(32)
+        - addColumn:
+            tableName: subscriptions
+            columns:
+              - column:
+                  name: version
+                  type: bigint
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column: { name: provisioning_owner, type: varchar(64) }
+              - column: { name: provisioning_lease_until, type: "timestamp with time zone" }
+              - column:
+                  name: provisioning_attempt_count
+                  type: integer
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column: { name: next_provisioning_attempt_at, type: "timestamp with time zone" }
+        - dropIndex:
+            tableName: subscriptions
+            indexName: uk_subscriptions_current_user
+        - sql:
+            sql: >
+              CREATE UNIQUE INDEX uk_subscriptions_current_user
+              ON subscriptions (user_id)
+              WHERE status IN ('PENDING', 'RECONCILIATION_REQUIRED', 'ACTIVE')
+        - sql:
+            sql: >
+              CREATE INDEX idx_subscriptions_provisioning_recovery
+              ON subscriptions (next_provisioning_attempt_at, provisioning_lease_until, updated_at)
+              WHERE status IN ('PENDING', 'RECONCILIATION_REQUIRED')
+      rollback:
+        - dropIndex:
+            tableName: subscriptions
+            indexName: idx_subscriptions_provisioning_recovery
+        - dropIndex:
+            tableName: subscriptions
+            indexName: uk_subscriptions_current_user
+        - sql:
+            sql: >
+              CREATE UNIQUE INDEX uk_subscriptions_current_user
+              ON subscriptions (user_id)
+              WHERE status IN ('PENDING', 'ACTIVE')
+        - dropColumn:
+            tableName: subscriptions
+            columnName: next_provisioning_attempt_at
+        - dropColumn:
+            tableName: subscriptions
+            columnName: provisioning_attempt_count
+        - dropColumn:
+            tableName: subscriptions
+            columnName: provisioning_lease_until
+        - dropColumn:
+            tableName: subscriptions
+            columnName: provisioning_owner
+        - dropColumn:
+            tableName: subscriptions
+            columnName: version
+        - modifyDataType:
+            tableName: subscriptions
+            columnName: status
+            newDataType: varchar(32)

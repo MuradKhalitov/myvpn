@@ -12,11 +12,31 @@ spring:
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
+logging:
+  level:
+    org.springframework.web.reactive.function.client: WARN
+    reactor.netty.http.client: WARN
+
 telegram:
   admin-ids: ${TELEGRAM_ADMIN_IDS:}
   bot-token: ${TELEGRAM_BOT_TOKEN:}
 
 vpn:
+  provider:
+    type: ${VPN_PROVIDER_TYPE:fake}
+  three-x-ui:
+    base-url: ${THREEXUI_BASE_URL:}
+    web-base-path: ${THREEXUI_WEB_BASE_PATH:}
+    username: ${THREEXUI_USERNAME:}
+    password: ${THREEXUI_PASSWORD:}
+    inbound-id: ${THREEXUI_INBOUND_ID:0}
+    connect-timeout: ${THREEXUI_CONNECT_TIMEOUT:5s}
+    read-timeout: ${THREEXUI_READ_TIMEOUT:10s}
+    max-mutation-attempts: ${THREEXUI_MAX_MUTATION_ATTEMPTS:3}
+    max-requests-per-operation: ${THREEXUI_MAX_REQUESTS_PER_OPERATION:8}
+    retry-initial-delay: ${THREEXUI_RETRY_INITIAL_DELAY:1s}
+    retry-max-delay: ${THREEXUI_RETRY_MAX_DELAY:8s}
   lifecycle:
     expiration-check-delay: 60000
     configuration-cleanup-delay: 3600000
+    pending-recovery-delay: 60000
