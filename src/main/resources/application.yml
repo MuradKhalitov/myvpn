@@ -14,6 +14,7 @@ spring:
 
 telegram:
   admin-ids: ${TELEGRAM_ADMIN_IDS:}
+  bot-token: ${TELEGRAM_BOT_TOKEN:}
 
 vpn:
   lifecycle:

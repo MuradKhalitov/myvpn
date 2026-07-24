@@ -15,6 +15,7 @@ import ru.murad.myvpn.service.UserService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.Optional;
 
 @Service
 @Validated
@@ -35,6 +36,12 @@ public class UserServiceImpl implements UserService {
                 .orElseGet(() -> createUser(request, now));
 
         return userMapper.toDto(userRepository.save(user));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<TelegramUserDto> findByTelegramId(long telegramId) {
+        return userRepository.findByTelegramId(telegramId).map(userMapper::toDto);
     }
 
     private TelegramUser createUser(RegisterTelegramUserRequest request, Instant now) {

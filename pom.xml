@@ -21,6 +21,7 @@
         <java.version>17</java.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <testcontainers.version>2.0.5</testcontainers.version>
+        <telegrambots.version>10.1.0</telegrambots.version>
     </properties>
 
     <dependencyManagement>
@@ -57,6 +58,16 @@
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
             <version>${mapstruct.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.telegram</groupId>
+            <artifactId>telegrambots-springboot-longpolling-starter</artifactId>
+            <version>${telegrambots.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.telegram</groupId>
+            <artifactId>telegrambots-client</artifactId>
+            <version>${telegrambots.version}</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
