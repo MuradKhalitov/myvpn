@@ -72,4 +72,9 @@ public class Subscription {
         this.status = SubscriptionStatus.EXPIRED;
         this.updatedAt = now;
     }
+
+    public void revoke(Instant now) {
+        this.status = SubscriptionStatus.REVOKED;
+        this.updatedAt = now;
+    }
 }

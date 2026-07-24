@@ -3,6 +3,7 @@ package ru.murad.myvpn.service;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
+import ru.murad.myvpn.dto.RevokeSubscriptionRequest;
 import ru.murad.myvpn.dto.SubscriptionDto;
 
 import java.util.Optional;
@@ -10,6 +11,8 @@ import java.util.Optional;
 public interface SubscriptionService {
 
     SubscriptionDto activate(@Valid ActivateSubscriptionRequest request);
+
+    void revoke(@Valid RevokeSubscriptionRequest request);
 
     Optional<SubscriptionDto> findCurrent(@Positive long userTelegramId);
 }

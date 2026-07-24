@@ -9,8 +9,10 @@ import ru.murad.myvpn.client.VpnExtensionRequest;
 import ru.murad.myvpn.client.VpnProvider;
 import ru.murad.myvpn.client.VpnProvisionRequest;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
+import ru.murad.myvpn.dto.RevokeSubscriptionRequest;
 import ru.murad.myvpn.dto.SubscriptionDto;
 import ru.murad.myvpn.exception.TelegramUserNotFoundException;
+import ru.murad.myvpn.exception.SubscriptionNotFoundException;
 import ru.murad.myvpn.exception.VpnAccessNotFoundException;
 import ru.murad.myvpn.exception.VpnTariffNotFoundException;
 import ru.murad.myvpn.mapper.SubscriptionMapper;
@@ -81,6 +83,24 @@ public class SubscriptionServiceImpl implements SubscriptionService {
                     VpnAccess access = findAccess(subscription);
                     return subscriptionMapper.toDto(subscription, access);
                 });
+    }
+
+    @Override
+    @Transactional
+    public void revoke(RevokeSubscriptionRequest request) {
+        adminAuthorizationService.checkAccess(request.administratorTelegramId());
+        Subscription subscription = subscriptionRepository
+                .findFirstByUserTelegramIdAndStatusOrderByExpiresAtDesc(
+                        request.userTelegramId(), SubscriptionStatus.ACTIVE)
+                .orElseThrow(() -> new SubscriptionNotFoundException(
+                        request.userTelegramId()));
+        Instant now = clock.instant();
+        VpnAccess access = findAccess(subscription);
+        vpnProvider.revoke(access.getExternalAccessId());
+        access.revoke(now);
+        subscription.revoke(now);
+        accessRepository.save(access);
+        subscriptionRepository.save(subscription);
     }
 
     private SubscriptionDto extend(

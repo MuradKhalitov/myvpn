@@ -66,4 +66,10 @@ public class VpnAccess {
         this.revokedAt = now;
         this.updatedAt = now;
     }
+
+    public void deleteConfiguration(Instant now) {
+        this.configurationData = null;
+        this.configurationDeletedAt = now;
+        this.updatedAt = now;
+    }
 }

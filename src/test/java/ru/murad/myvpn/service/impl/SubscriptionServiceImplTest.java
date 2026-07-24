@@ -10,6 +10,7 @@ import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.client.VpnExtensionRequest;
 import ru.murad.myvpn.client.VpnProvider;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
+import ru.murad.myvpn.dto.RevokeSubscriptionRequest;
 import ru.murad.myvpn.dto.SubscriptionDto;
 import ru.murad.myvpn.exception.AdministratorAccessDeniedException;
 import ru.murad.myvpn.mapper.SubscriptionMapper;
@@ -143,6 +144,28 @@ class SubscriptionServiceImplTest {
 
         verify(adminAuthorizationService).checkAccess(ADMIN_ID);
         verify(userRepository, never()).findByTelegramId(USER_TELEGRAM_ID);
+    }
+
+    @Test
+    void shouldRevokeActiveSubscriptionAndVpnAccess() {
+        TelegramUser user = user();
+        Subscription subscription = subscription(
+                user, tariff("MONTH_1", 30), NOW.plusSeconds(3600));
+        VpnAccess access = access(subscription);
+        when(subscriptionRepository
+                .findFirstByUserTelegramIdAndStatusOrderByExpiresAtDesc(
+                        USER_TELEGRAM_ID, SubscriptionStatus.ACTIVE))
+                .thenReturn(Optional.of(subscription));
+        when(accessRepository.findBySubscriptionId(subscription.getId()))
+                .thenReturn(Optional.of(access));
+
+        service.revoke(new RevokeSubscriptionRequest(ADMIN_ID, USER_TELEGRAM_ID));
+
+        verify(adminAuthorizationService).checkAccess(ADMIN_ID);
+        verify(vpnProvider).revoke("external-1");
+        assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.REVOKED);
+        assertThat(access.getStatus()).isEqualTo(VpnAccessStatus.REVOKED);
+        assertThat(access.getRevokedAt()).isEqualTo(NOW);
     }
 
     private TelegramUser user() {

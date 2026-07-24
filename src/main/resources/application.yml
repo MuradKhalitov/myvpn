@@ -14,3 +14,8 @@ spring:
 
 telegram:
   admin-ids: ${TELEGRAM_ADMIN_IDS:}
+
+vpn:
+  lifecycle:
+    expiration-check-delay: 60000
+    configuration-cleanup-delay: 3600000
