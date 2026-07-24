@@ -2,12 +2,17 @@ package ru.murad.myvpn.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -22,11 +27,16 @@ import ru.murad.myvpn.exception.ThreeXUiNotFoundException;
 import ru.murad.myvpn.exception.ThreeXUiRetryableException;
 
 import java.net.URI;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Component
 @ConditionalOnProperty(name = "vpn.provider.type", havingValue = "3x-ui")
 public class ThreeXUiInboundClient {
+
+    private static final Logger LOGGER =
+            LoggerFactory.getLogger(ThreeXUiInboundClient.class);
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
@@ -85,6 +95,57 @@ public class ThreeXUiInboundClient {
         mutate(urlFactory.updateClient(clientUuid), request, "update client", budget);
     }
 
+    public ThreeXUiClientRequest prepareExpiryUpdateRequest(
+            ThreeXUiInboundResponse inbound,
+            String clientUuid,
+            long expiryTime
+    ) {
+        try {
+            JsonNode settings = objectMapper.readTree(inbound.settings());
+            JsonNode clients = settings == null ? null : settings.get("clients");
+            if (!(clients instanceof ArrayNode clientsArray)) {
+                throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+            }
+            ObjectNode target = null;
+            for (JsonNode candidate : clientsArray) {
+                if (candidate instanceof ObjectNode object
+                        && clientUuid.equals(object.path("id").asText(null))) {
+                    target = object.deepCopy();
+                    break;
+                }
+            }
+            if (target == null) {
+                throw new ThreeXUiNotFoundException("extend client");
+            }
+            target.put("expiryTime", expiryTime);
+            ObjectNode updateSettings = objectMapper.createObjectNode();
+            updateSettings.set("clients", objectMapper.createArrayNode().add(target));
+            return new ThreeXUiClientRequest(
+                    properties.inboundId(),
+                    objectMapper.writeValueAsString(updateSettings));
+        } catch (JsonProcessingException exception) {
+            throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+        }
+    }
+
+    public boolean otherClientsUnchanged(
+            ThreeXUiInboundResponse before,
+            ThreeXUiInboundResponse after,
+            String targetClientUuid
+    ) {
+        try {
+            ArrayNode beforeClients = clientsNode(before);
+            ArrayNode afterClients = clientsNode(after);
+            if (beforeClients.size() != afterClients.size()) {
+                return false;
+            }
+            return clientsByIdExcluding(beforeClients, targetClientUuid)
+                    .equals(clientsByIdExcluding(afterClients, targetClientUuid));
+        } catch (JsonProcessingException exception) {
+            throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+        }
+    }
+
     public void deleteClient(String clientUuid, ThreeXUiRequestBudget budget) {
         mutate(urlFactory.deleteClient(properties.inboundId(), clientUuid),
                 null, "delete client", budget);
@@ -123,8 +184,13 @@ public class ThreeXUiInboundClient {
         RawResponse response = exchange(HttpMethod.POST, uri, body, budget, false);
         ThreeXUiApiResponse<Void> apiResponse = readResponse(response.body(), Void.class);
         if (!apiResponse.success()) {
+            LOGGER.warn("3x-ui operation={} httpStatus={} apiSuccess=false "
+                            + "errorCategory=business_rejection",
+                    operation, response.status().value());
             throw new ThreeXUiException("3x-ui rejected operation: " + operation);
         }
+        LOGGER.debug("3x-ui operation={} httpStatus={} apiSuccess=true",
+                operation, response.status().value());
     }
 
     private RawResponse exchange(
@@ -231,6 +297,34 @@ public class ThreeXUiInboundClient {
         } catch (JsonProcessingException exception) {
             throw new ThreeXUiException("Invalid 3x-ui API response format");
         }
+    }
+
+    private ArrayNode clientsNode(
+            ThreeXUiInboundResponse inbound
+    ) throws JsonProcessingException {
+        JsonNode settings = objectMapper.readTree(inbound.settings());
+        JsonNode clients = settings == null ? null : settings.get("clients");
+        if (clients instanceof ArrayNode array) {
+            return array;
+        }
+        throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+    }
+
+    private Map<String, JsonNode> clientsByIdExcluding(
+            ArrayNode clients,
+            String excludedClientUuid
+    ) {
+        Map<String, JsonNode> result = new HashMap<>();
+        for (JsonNode client : clients) {
+            String id = client.path("id").asText(null);
+            if (id == null) {
+                throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+            }
+            if (!excludedClientUuid.equals(id)) {
+                result.put(id, client);
+            }
+        }
+        return result;
     }
 
     public void pause(int attempt) {

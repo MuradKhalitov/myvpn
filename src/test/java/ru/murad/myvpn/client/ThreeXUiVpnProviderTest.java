@@ -146,30 +146,28 @@ class ThreeXUiVpnProviderTest {
                 100L, true, 0L, "preserved-sub-id", "preserved-comment",
                 30, 10L, 20L);
         ThreeXUiVlessClient updated = existing.withExpiryTime(EXPIRY.toEpochMilli());
+        ThreeXUiClientRequest updateRequest =
+                new ThreeXUiClientRequest(42, "target-only-settings");
         when(inboundClient.getInbound(any())).thenReturn(before);
         when(inboundClient.getInboundForReconciliation(any())).thenReturn(after);
         when(inboundClient.parseSettings(before))
                 .thenReturn(new ThreeXUiInboundSettings(List.of(existing)));
         when(inboundClient.parseSettings(after))
                 .thenReturn(new ThreeXUiInboundSettings(List.of(updated)));
-        when(inboundClient.serializeSettings(any())).thenReturn("settings");
+        when(inboundClient.prepareExpiryUpdateRequest(
+                before, SUBSCRIPTION_ID.toString(), EXPIRY.toEpochMilli()))
+                .thenReturn(updateRequest);
+        when(inboundClient.otherClientsUnchanged(
+                before, after, SUBSCRIPTION_ID.toString()))
+                .thenReturn(true);
 
         provider.extend(new VpnExtensionRequest(
                 SUBSCRIPTION_ID.toString(), EXPIRY));
 
-        ArgumentCaptor<ThreeXUiInboundSettings> settingsCaptor =
-                ArgumentCaptor.forClass(ThreeXUiInboundSettings.class);
-        verify(inboundClient).serializeSettings(settingsCaptor.capture());
-        assertThat(settingsCaptor.getValue().clients()).singleElement()
-                .satisfies(value -> {
-                    assertThat(value.expiryTime()).isEqualTo(EXPIRY.toEpochMilli());
-                    assertThat(value.email()).isEqualTo("preserved-email");
-                    assertThat(value.flow()).isEqualTo("preserved-flow");
-                    assertThat(value.totalGB()).isEqualTo(1000L);
-                    assertThat(value.limitIp()).isEqualTo(2);
-                    assertThat(value.subId()).isEqualTo("preserved-sub-id");
-                    assertThat(value.comment()).isEqualTo("preserved-comment");
-                });
+        verify(inboundClient).updateClient(
+                org.mockito.ArgumentMatchers.eq(SUBSCRIPTION_ID.toString()),
+                org.mockito.ArgumentMatchers.eq(updateRequest),
+                org.mockito.ArgumentMatchers.any());
     }
 
     @Test

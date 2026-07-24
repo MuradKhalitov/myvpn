@@ -1,6 +1,7 @@
 package ru.murad.myvpn.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +16,7 @@ import ru.murad.myvpn.exception.ThreeXUiException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
@@ -271,6 +273,90 @@ class ThreeXUiInboundClientWireMockTest {
                         urlEqualTo(WEB_PATH + "/panel/api/inbounds/addClient"))
                 .withRequestBody(equalTo("""
                         {"id":42,"settings":"{\\"clients\\":[{\\"id\\":\\"test-client\\",\\"flow\\":\\"\\",\\"email\\":\\"test-email\\",\\"limitIp\\":0,\\"totalGB\\":0,\\"expiryTime\\":12345,\\"enable\\":true,\\"tgId\\":0,\\"subId\\":\\"\\"}]}"}""")));
+    }
+
+    @Test
+    void updateMustSendOnlyTargetClientAndPreserveUnknownFields() throws Exception {
+        String serviceId = "20000000-0000-0000-0000-000000000001";
+        String targetId = "20000000-0000-0000-0000-000000000002";
+        long oldExpiry = 1000L;
+        long newExpiry = 2000L;
+        String beforeSettings = """
+                {"clients":[
+                  {"id":"%s","email":"service","enable":true,"expiryTime":0},
+                  {"id":"%s","email":"target","enable":true,"expiryTime":%d,
+                   "totalGB":0,"limitIp":0,"flow":"","tgId":0,"subId":"",
+                   "customField":{"enabled":true}}
+                ]}""".formatted(serviceId, targetId, oldExpiry);
+        String afterSettings = beforeSettings.replace(
+                "\"expiryTime\":" + oldExpiry,
+                "\"expiryTime\":" + newExpiry);
+        stubLogin(COOKIE);
+        server.stubFor(get(urlEqualTo(inboundPath()))
+                .inScenario("update-target")
+                .whenScenarioStateIs("Started")
+                .willReturn(json(inboundResponse("vless", beforeSettings)))
+                .willSetStateTo("read"));
+        server.stubFor(post(urlEqualTo(
+                        WEB_PATH + "/panel/api/inbounds/updateClient/" + targetId))
+                .inScenario("update-target")
+                .whenScenarioStateIs("read")
+                .willReturn(json("{\"success\":true,\"msg\":\"\",\"obj\":null}"))
+                .willSetStateTo("updated"));
+        server.stubFor(get(urlEqualTo(inboundPath()))
+                .inScenario("update-target")
+                .whenScenarioStateIs("updated")
+                .willReturn(json(inboundResponse("vless", afterSettings))));
+
+        provider(8).extend(new VpnExtensionRequest(
+                targetId, java.time.Instant.ofEpochMilli(newExpiry)));
+
+        var requestEvent = server.getAllServeEvents().stream()
+                .filter(event -> event.getRequest().getUrl()
+                        .endsWith("/updateClient/" + targetId))
+                .findFirst()
+                .orElseThrow();
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode requestBody = mapper.readTree(
+                requestEvent.getRequest().getBodyAsString());
+        JsonNode settings = mapper.readTree(requestBody.path("settings").asText());
+
+        assertThat(requestBody.path("id").asInt()).isEqualTo(42);
+        assertThat(settings.path("clients").size()).isEqualTo(1);
+        JsonNode sentClient = settings.path("clients").get(0);
+        assertThat(sentClient.path("id").asText()).isEqualTo(targetId);
+        assertThat(sentClient.path("id").asText()).isNotEqualTo(serviceId);
+        assertThat(sentClient.path("expiryTime").asLong()).isEqualTo(newExpiry);
+        assertThat(sentClient.path("email").asText()).isEqualTo("target");
+        assertThat(sentClient.path("enable").asBoolean()).isTrue();
+        assertThat(sentClient.path("customField").path("enabled").asBoolean()).isTrue();
+    }
+
+    @Test
+    void failedUpdateEnvelopeMustNotExposeResponseOrClientData() {
+        String clientId = UUID.fromString(
+                "20000000-0000-0000-0000-000000000003").toString();
+        String secretMarker = "SENSITIVE_UPDATE_MARKER";
+        stubLogin(COOKIE);
+        server.stubFor(post(urlEqualTo(
+                        WEB_PATH + "/panel/api/inbounds/updateClient/" + clientId))
+                .willReturn(json("{\"success\":false,\"msg\":\""
+                        + secretMarker + "\",\"obj\":null}")));
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(
+                () -> client.updateClient(
+                        clientId,
+                        new ThreeXUiClientRequest(42,
+                                "{\"clients\":[{\"id\":\"" + clientId + "\"}]}"),
+                        budget));
+
+        java.io.StringWriter stack = new java.io.StringWriter();
+        thrown.printStackTrace(new java.io.PrintWriter(stack));
+        assertThat(thrown).isInstanceOf(ThreeXUiException.class)
+                .hasMessage("3x-ui rejected operation: update client");
+        assertThat(stack.toString())
+                .doesNotContain(secretMarker)
+                .doesNotContain(clientId);
     }
 
     @Test

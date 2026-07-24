@@ -105,12 +105,15 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                         && existing.expiryTime() == expectedExpiry) {
                     return;
                 }
-                ThreeXUiVlessClient updated = existing.withExpiryTime(expectedExpiry);
                 budget.reserveReconciliation();
                 inboundClient.updateClient(
-                        request.externalAccessId(), request(updated), budget);
-                if (isExpiryApplied(
-                        request.externalAccessId(), expectedExpiry, budget, true)) {
+                        request.externalAccessId(),
+                        inboundClient.prepareExpiryUpdateRequest(
+                                inbound, request.externalAccessId(), expectedExpiry),
+                        budget);
+                if (isExpiryAppliedAndOthersPreserved(
+                        inbound, request.externalAccessId(),
+                        expectedExpiry, budget)) {
                     return;
                 }
             } catch (ThreeXUiRetryableException exception) {
@@ -201,6 +204,22 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                 .map(client -> client.expiryTime() != null
                         && client.expiryTime() == expiryTime)
                 .orElse(false);
+    }
+
+    private boolean isExpiryAppliedAndOthersPreserved(
+            ThreeXUiInboundResponse before,
+            String clientUuid,
+            long expiryTime,
+            ThreeXUiRequestBudget budget
+    ) {
+        ThreeXUiInboundResponse after =
+                inboundClient.getInboundForReconciliation(budget);
+        boolean expiryApplied = findClient(after, clientUuid)
+                .map(client -> client.expiryTime() != null
+                        && client.expiryTime() == expiryTime)
+                .orElse(false);
+        return expiryApplied
+                && inboundClient.otherClientsUnchanged(before, after, clientUuid);
     }
 
     private Optional<ThreeXUiVlessClient> findClient(
