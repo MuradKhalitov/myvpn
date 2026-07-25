@@ -2,33 +2,54 @@ package ru.murad.myvpn.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import ru.murad.myvpn.config.PaymentProperties;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
+import ru.murad.myvpn.dto.PaymentCheckoutResult;
+import ru.murad.myvpn.dto.ProviderPayment;
 import ru.murad.myvpn.dto.RegisterTelegramUserRequest;
 import ru.murad.myvpn.dto.RevokeSubscriptionRequest;
 import ru.murad.myvpn.dto.SubscriptionDto;
+import ru.murad.myvpn.dto.TelegramButton;
+import ru.murad.myvpn.dto.TelegramCallbackQuery;
+import ru.murad.myvpn.dto.TelegramCommandResponse;
 import ru.murad.myvpn.dto.TelegramIncomingMessage;
 import ru.murad.myvpn.dto.TelegramUserDto;
 import ru.murad.myvpn.dto.VpnTariffDto;
 import ru.murad.myvpn.exception.AdministratorAccessDeniedException;
+import ru.murad.myvpn.exception.PaymentNotFoundException;
+import ru.murad.myvpn.exception.FakePaymentStateLostException;
+import ru.murad.myvpn.model.PaymentProviderType;
+import ru.murad.myvpn.model.PaymentStatus;
+import ru.murad.myvpn.model.ProviderPaymentStatus;
+import ru.murad.myvpn.repository.PaymentOrderRepository;
+import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.service.AdminAuthorizationService;
+import ru.murad.myvpn.service.FakePaymentControlService;
+import ru.murad.myvpn.service.FakePaymentRecoveryService;
+import ru.murad.myvpn.client.PaymentConfirmationUrl;
+import ru.murad.myvpn.service.PaymentCheckoutService;
 import ru.murad.myvpn.service.SubscriptionService;
 import ru.murad.myvpn.service.TariffService;
 import ru.murad.myvpn.service.TelegramCommandService;
 import ru.murad.myvpn.service.UserService;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class TelegramCommandServiceImpl implements TelegramCommandService {
 
-    private static final String WELCOME = """
-            Добро пожаловать в My VPN! Здесь вы можете посмотреть тарифы,
-            проверить подписку и получить данные для подключения""";
+    private static final Pattern TARIFF_CALLBACK_CODE =
+            Pattern.compile("[A-Z0-9_-]{1,32}");
+    private static final String WELCOME =
+            "Добро пожаловать в My VPN!";
     private static final String HELP = """
             Доступные команды:
             /start — регистрация
             /tariffs — доступные тарифы
+            /buy — купить подписку
             /subscription — текущая подписка
             /help — помощь""";
 
@@ -36,27 +57,82 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
     private final TariffService tariffService;
     private final SubscriptionService subscriptionService;
     private final AdminAuthorizationService adminAuthorizationService;
+    private final PaymentCheckoutService paymentCheckoutService;
+    private final PaymentProperties paymentProperties;
+    private final TelegramUserRepository telegramUserRepository;
+    private final PaymentOrderRepository paymentOrderRepository;
+    private final Optional<FakePaymentControlService> fakePaymentControlService;
+    private final Optional<FakePaymentRecoveryService> fakePaymentRecoveryService;
 
     @Override
     public String handle(TelegramIncomingMessage message) {
+        return handleResponse(message).text();
+    }
+
+    @Override
+    public TelegramCommandResponse handleResponse(TelegramIncomingMessage message) {
         try {
             String[] parts = message.text().trim().split("\\s+");
             return switch (parts[0].toLowerCase()) {
-                case "/start" -> start(message);
-                case "/tariffs" -> tariffs();
-                case "/subscription" -> subscription(message.telegramId());
-                case "/help" -> HELP;
-                case "/activate" -> activate(message.telegramId(), parts);
-                case "/revoke" -> revoke(message.telegramId(), parts);
-                case "/user" -> user(message.telegramId(), parts);
-                default -> "Неизвестная команда. Используйте /help.";
+                case "/buy" -> buy();
+                case "/fakepay_success" -> fakePaySuccess(message.telegramId(), parts);
+                case "/fakepay_reset" -> fakePayReset(message.telegramId(), parts);
+                case "/start" -> TelegramCommandResponse.text(start(message));
+                case "/tariffs" -> TelegramCommandResponse.text(tariffs());
+                case "/subscription" ->
+                        TelegramCommandResponse.text(subscription(message.telegramId()));
+                case "/help" -> TelegramCommandResponse.text(HELP);
+                case "/activate" ->
+                        TelegramCommandResponse.text(activate(message.telegramId(), parts));
+                case "/revoke" ->
+                        TelegramCommandResponse.text(revoke(message.telegramId(), parts));
+                case "/user" ->
+                        TelegramCommandResponse.text(user(message.telegramId(), parts));
+                default -> TelegramCommandResponse.text(
+                        "Неизвестная команда. Используйте /help.");
             };
         } catch (AdministratorAccessDeniedException exception) {
-            return "Доступ запрещён.";
+            return TelegramCommandResponse.text("Доступ запрещён.");
+        } catch (FakePaymentStateLostException exception) {
+            return TelegramCommandResponse.text(
+                    "Состояние тестового платежа потеряно после перезапуска. "
+                            + "Обратитесь к администратору для /fakepay_reset.");
         } catch (IllegalArgumentException exception) {
-            return "Не удалось выполнить команду: " + exception.getMessage();
+            return TelegramCommandResponse.text(
+                    "Не удалось выполнить команду: " + exception.getMessage());
         } catch (RuntimeException exception) {
-            return "Не удалось выполнить команду. Повторите попытку позже.";
+            return TelegramCommandResponse.text(
+                    "Не удалось выполнить команду. Повторите попытку позже.");
+        }
+    }
+
+    @Override
+    public TelegramCommandResponse handleCallback(TelegramCallbackQuery callback) {
+        try {
+            if (callback.data().startsWith("buy:")) {
+                String tariffCode = callback.data().substring("buy:".length());
+                if (!TARIFF_CALLBACK_CODE.matcher(tariffCode).matches()) {
+                    throw new IllegalArgumentException("Некорректный тариф");
+                }
+                return checkout(paymentCheckoutService.startCheckout(
+                        callback.telegramId(), tariffCode));
+            }
+            if ("payment:check".equals(callback.data())) {
+                return TelegramCommandResponse.text(formatProviderStatus(
+                        paymentCheckoutService.checkCurrentPayment(
+                                callback.telegramId())));
+            }
+            return TelegramCommandResponse.text("Неизвестное действие.");
+        } catch (FakePaymentStateLostException exception) {
+            return TelegramCommandResponse.text(
+                    "Состояние тестового платежа потеряно после перезапуска. "
+                            + "Обратитесь к администратору для /fakepay_reset.");
+        } catch (IllegalArgumentException exception) {
+            return TelegramCommandResponse.text(
+                    "Не удалось выполнить действие: " + exception.getMessage());
+        } catch (RuntimeException exception) {
+            return TelegramCommandResponse.text(
+                    "Не удалось выполнить действие. Повторите попытку позже.");
         }
     }
 
@@ -65,6 +141,84 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
                 message.telegramId(), message.chatId(), message.username(),
                 message.firstName(), message.lastName()));
         return WELCOME + "\n\n" + HELP;
+    }
+
+    private TelegramCommandResponse buy() {
+        List<VpnTariffDto> tariffs = tariffService.findAvailableTariffs();
+        if (tariffs.isEmpty()) {
+            return TelegramCommandResponse.text("Сейчас нет доступных тарифов.");
+        }
+        List<List<TelegramButton>> keyboard = tariffs.stream()
+                .map(tariff -> List.of(TelegramButton.callback(
+                        tariff.name() + " — " + tariff.price().toPlainString() + " RUB",
+                        "buy:" + tariff.code())))
+                .toList();
+        return new TelegramCommandResponse("Выберите тариф:", keyboard);
+    }
+
+    private TelegramCommandResponse checkout(PaymentCheckoutResult checkout) {
+        PaymentConfirmationUrl.fake(checkout.confirmationUrl());
+        String text = "Тариф: " + checkout.tariffName()
+                + "\nСтоимость: " + checkout.amount().toPlainString()
+                + " " + checkout.currency()
+                + "\nСрок: " + checkout.durationDays() + " дней"
+                + "\n\nНажмите кнопку для оплаты.";
+        return new TelegramCommandResponse(text, List.of(
+                List.of(TelegramButton.url(
+                        "Оплатить", checkout.confirmationUrl().toString())),
+                List.of(TelegramButton.callback(
+                        "Проверить оплату", "payment:check"))));
+    }
+
+    private TelegramCommandResponse fakePayReset(
+            long administratorId,
+            String[] parts
+    ) {
+        adminAuthorizationService.checkAccess(administratorId);
+        if (paymentProperties.provider() != PaymentProviderType.FAKE
+                || fakePaymentRecoveryService.isEmpty()) {
+            throw new IllegalArgumentException("Fake payment provider is disabled");
+        }
+        requireArguments(parts, 2, "/fakepay_reset <telegramId>");
+        fakePaymentRecoveryService.get().resetLostPayment(
+                administratorId, Long.parseLong(parts[1]));
+        return TelegramCommandResponse.text(
+                "Потерянный fake-платёж закрыт. Можно создать новый checkout.");
+    }
+
+    private TelegramCommandResponse fakePaySuccess(
+            long administratorId,
+            String[] parts
+    ) {
+        adminAuthorizationService.checkAccess(administratorId);
+        if (paymentProperties.provider() != PaymentProviderType.FAKE
+                || fakePaymentControlService.isEmpty()) {
+            throw new IllegalArgumentException("Fake payment provider is disabled");
+        }
+        requireArguments(parts, 2, "/fakepay_success <telegramId>");
+        long targetTelegramId = Long.parseLong(parts[1]);
+        var user = telegramUserRepository.findByTelegramId(targetTelegramId)
+                .orElseThrow(PaymentNotFoundException::new);
+        var order = paymentOrderRepository.findOpenByUser(user.getId())
+                .filter(candidate -> candidate.getStatus() == PaymentStatus.PENDING)
+                .orElseThrow(PaymentNotFoundException::new);
+        if (order.getProvider() != PaymentProviderType.FAKE) {
+            throw new IllegalArgumentException(
+                    "Команда доступна только для fake-платежей");
+        }
+        fakePaymentControlService.get().markSucceeded(order.getProviderPaymentId());
+        return TelegramCommandResponse.text(
+                "Fake payment имеет статус SUCCEEDED у провайдера.");
+    }
+
+    private String formatProviderStatus(ProviderPayment payment) {
+        if (payment.status() == ProviderPaymentStatus.SUCCEEDED) {
+            return "Оплата подтверждена, обработка будет добавлена следующим этапом";
+        }
+        if (payment.status() == ProviderPaymentStatus.CANCELED) {
+            return "Платёж отменён";
+        }
+        return "Ожидает оплаты";
     }
 
     private String tariffs() {
@@ -107,7 +261,8 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
         adminAuthorizationService.checkAccess(administratorId);
         long telegramId = Long.parseLong(parts[1]);
         TelegramUserDto user = userService.findByTelegramId(telegramId)
-                .orElseThrow(() -> new IllegalArgumentException("Пользователь не найден"));
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Пользователь не найден"));
         return "Пользователь " + user.telegramId()
                 + (user.username() == null ? "" : " @" + user.username())
                 + "\n" + subscription(telegramId);

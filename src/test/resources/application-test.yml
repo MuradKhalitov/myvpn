@@ -5,3 +5,9 @@ spring:
     open-in-view: false
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
+
+payment:
+  provider: fake
+  pending-ttl: 1h
+  return-url: https://example.invalid/payment-return
+  allow-fake: true

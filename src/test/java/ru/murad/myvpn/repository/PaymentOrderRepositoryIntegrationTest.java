@@ -24,9 +24,18 @@ import ru.murad.myvpn.model.PaymentStatus;
 import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.UserRole;
 import ru.murad.myvpn.model.VpnTariff;
+import ru.murad.myvpn.dto.CreatedPayment;
+import ru.murad.myvpn.dto.PaymentCheckoutResult;
+import ru.murad.myvpn.dto.PreparedCheckout;
+import ru.murad.myvpn.model.ProviderPaymentStatus;
+import ru.murad.myvpn.exception.PaymentProviderUncertainException;
+import ru.murad.myvpn.service.PaymentCheckoutTransactionService;
+import ru.murad.myvpn.service.PaymentCheckoutService;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.Clock;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -67,6 +76,9 @@ class PaymentOrderRepositoryIntegrationTest {
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private EntityManagerFactory entityManagerFactory;
     @Autowired private PlatformTransactionManager transactionManager;
+    @Autowired private PaymentCheckoutService paymentCheckoutService;
+    @Autowired private PaymentCheckoutTransactionService checkoutTransactionService;
+    @Autowired private Clock clock;
 
     @BeforeEach
     void cleanDatabase() {
@@ -107,6 +119,207 @@ class PaymentOrderRepositoryIntegrationTest {
         assertThat(secondGeneration).isEqualTo(2L);
         assertThat(found.getActivationGeneration()).isEqualTo(secondGeneration);
         assertThat(found.getActivationClaimToken()).isEqualTo(secondToken);
+    }
+
+    @Test
+    void providerExpiryMustPersistSeparatelyFromLocalExpiry() {
+        PaymentOrder order = order(user(1032L), PaymentProviderType.FAKE);
+        Instant localExpiry = order.getExpiresAt();
+        Instant providerExpiry = NOW.plusSeconds(1800);
+        order.markCreating(NOW.plusSeconds(1));
+        order.markPending("expiry-payment",
+                "https://example.invalid/fake-pay/abcdefghijklmnop",
+                NOW, providerExpiry, NOW.plusSeconds(2));
+
+        PaymentOrder saved = paymentOrderRepository.saveAndFlush(order);
+        PaymentOrder found = paymentOrderRepository.findById(saved.getId())
+                .orElseThrow();
+
+        assertThat(found.getExpiresAt()).isEqualTo(localExpiry);
+        assertThat(found.getProviderExpiresAt()).isEqualTo(providerExpiry);
+    }
+
+    @Test
+    void checkoutMustPersistPendingExternalPaymentAndReuseOrder() {
+        TelegramUser user = user(1033L);
+
+        var first = paymentCheckoutService.startCheckout(
+                user.getTelegramId(), "MONTH_1");
+        var second = paymentCheckoutService.startCheckout(
+                user.getTelegramId(), "MONTH_1");
+        PaymentOrder persisted = paymentOrderRepository.findById(
+                first.paymentOrderId()).orElseThrow();
+
+        assertThat(second.paymentOrderId()).isEqualTo(first.paymentOrderId());
+        assertThat(second.confirmationUrl()).isEqualTo(first.confirmationUrl());
+        assertThat(persisted.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(persisted.getProviderPaymentId()).isNotBlank();
+        assertThat(persisted.getConfirmationUrl())
+                .startsWith("https://example.invalid/fake-pay/");
+        assertThat(persisted.getProviderExpiresAt()).isNull();
+        assertThat(paymentOrderRepository.count()).isEqualTo(1);
+        assertThat(subscriptionRepository.count()).isZero();
+    }
+
+    @Test
+    void concurrentCheckoutMustLeaveOneOrderAndOnePaymentIdentity() throws Exception {
+        TelegramUser user = user(1034L);
+        CyclicBarrier start = new CyclicBarrier(2);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> {
+                await(start);
+                return paymentCheckoutService.startCheckout(
+                        user.getTelegramId(), "MONTH_1");
+            });
+            var second = executor.submit(() -> {
+                await(start);
+                return paymentCheckoutService.startCheckout(
+                        user.getTelegramId(), "MONTH_1");
+            });
+
+            var firstResult = first.get(10, TimeUnit.SECONDS);
+            var secondResult = second.get(10, TimeUnit.SECONDS);
+            assertThat(secondResult.paymentOrderId())
+                    .isEqualTo(firstResult.paymentOrderId());
+            assertThat(secondResult.confirmationUrl())
+                    .isEqualTo(firstResult.confirmationUrl());
+            assertThat(paymentOrderRepository.count()).isEqualTo(1);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentIdenticalApplyResultsMustBeIdempotent() throws Exception {
+        PaymentOrder order = creatingOrder(1040L);
+        PreparedCheckout prepared = prepared(order);
+        CreatedPayment result = created("same-payment");
+        CyclicBarrier start = new CyclicBarrier(2);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> applyAfter(start, prepared, result));
+            var second = executor.submit(() -> applyAfter(start, prepared, result));
+            PaymentCheckoutResult firstResult = first.get(10, TimeUnit.SECONDS);
+            PaymentCheckoutResult secondResult = second.get(10, TimeUnit.SECONDS);
+
+            assertThat(firstResult.paymentOrderId()).isEqualTo(order.getId());
+            assertThat(secondResult).isEqualTo(firstResult);
+        } finally {
+            executor.shutdownNow();
+        }
+        PaymentOrder persisted = paymentOrderRepository.findById(order.getId())
+                .orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(persisted.getProviderPaymentId()).isEqualTo("same-payment");
+        assertThat(paymentOrderRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void concurrentIncompatibleApplyResultsMustNotOverwriteWinner() throws Exception {
+        PaymentOrder order = creatingOrder(1041L);
+        PreparedCheckout prepared = prepared(order);
+        CyclicBarrier start = new CyclicBarrier(2);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> applyAfter(
+                    start, prepared, created("payment-A")));
+            var second = executor.submit(() -> applyAfter(
+                    start, prepared, created("payment-B")));
+            var firstOutcome = outcome(first);
+            var secondOutcome = outcome(second);
+
+            assertThat(List.of(firstOutcome.success, secondOutcome.success))
+                    .containsExactlyInAnyOrder(true, false);
+            Throwable failure = firstOutcome.success
+                    ? secondOutcome.failure : firstOutcome.failure;
+            assertThat(failure).isInstanceOf(PaymentProviderUncertainException.class);
+            assertThat(failure.getMessage()).doesNotContain("payment-A", "payment-B");
+        } finally {
+            executor.shutdownNow();
+        }
+        PaymentOrder persisted = paymentOrderRepository.findById(order.getId())
+                .orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(persisted.getProviderPaymentId())
+                .isIn("payment-A", "payment-B");
+    }
+
+    @Test
+    void permanentFailureAfterSuccessfulApplyMustNotDowngradePending() {
+        PaymentOrder order = creatingOrder(1042L);
+        PreparedCheckout prepared = prepared(order);
+        checkoutTransactionService.applyCreatedPayment(
+                prepared, created("successful-payment"), clock.instant());
+
+        checkoutTransactionService.markPermanentFailure(prepared, clock.instant());
+
+        PaymentOrder persisted = paymentOrderRepository.findById(order.getId())
+                .orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(persisted.getProviderPaymentId()).isEqualTo("successful-payment");
+    }
+
+    @Test
+    void permanentFailureBeforeApplyMustFenceApplyAndKeepFailed() {
+        PaymentOrder order = creatingOrder(1043L);
+        PreparedCheckout prepared = prepared(order);
+        checkoutTransactionService.markPermanentFailure(prepared, clock.instant());
+
+        assertThatThrownBy(() -> checkoutTransactionService.applyCreatedPayment(
+                prepared, created("late-payment"), clock.instant()))
+                .isInstanceOf(PaymentProviderUncertainException.class)
+                .hasMessageNotContaining("late-payment");
+        PaymentOrder persisted = paymentOrderRepository.findById(order.getId())
+                .orElseThrow();
+        assertThat(persisted.getStatus()).isEqualTo(PaymentStatus.FAILED);
+        assertThat(persisted.getProviderPaymentId()).isNull();
+    }
+
+    @Test
+    void concurrentApplyAndPermanentFailureMustPreserveTerminalWinner() throws Exception {
+        PaymentOrder order = creatingOrder(1044L);
+        PreparedCheckout prepared = prepared(order);
+        CyclicBarrier start = new CyclicBarrier(2);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var apply = executor.submit(() -> {
+                await(start);
+                try {
+                    return checkoutTransactionService.applyCreatedPayment(
+                            prepared, created("racing-payment"), clock.instant());
+                } catch (RuntimeException exception) {
+                    return exception;
+                }
+            });
+            var permanent = executor.submit(() -> {
+                await(start);
+                try {
+                    checkoutTransactionService.markPermanentFailure(
+                            prepared, clock.instant());
+                    return null;
+                } catch (RuntimeException exception) {
+                    return exception;
+                }
+            });
+            Object applyOutcome = apply.get(10, TimeUnit.SECONDS);
+            Object permanentOutcome = permanent.get(10, TimeUnit.SECONDS);
+            assertThat(applyOutcome == null || applyOutcome instanceof PaymentCheckoutResult
+                    || applyOutcome instanceof PaymentProviderUncertainException).isTrue();
+            assertThat(permanentOutcome == null
+                    || permanentOutcome instanceof PaymentProviderUncertainException).isTrue();
+        } finally {
+            executor.shutdownNow();
+        }
+        PaymentOrder persisted = paymentOrderRepository.findById(order.getId())
+                .orElseThrow();
+        assertThat(persisted.getStatus())
+                .isIn(PaymentStatus.PENDING, PaymentStatus.FAILED);
+        if (persisted.getStatus() == PaymentStatus.PENDING) {
+            assertThat(persisted.getProviderPaymentId()).isEqualTo("racing-payment");
+        } else {
+            assertThat(persisted.getProviderPaymentId()).isNull();
+        }
     }
 
     @Test
@@ -371,6 +584,58 @@ class PaymentOrderRepositoryIntegrationTest {
         }
     }
 
+    private PaymentOrder creatingOrder(long telegramId) {
+        PaymentOrder order = order(user(telegramId), PaymentProviderType.FAKE);
+        order.markCreating(clock.instant());
+        PaymentOrder saved = paymentOrderRepository.saveAndFlush(order);
+        return paymentOrderRepository.findById(saved.getId()).orElseThrow();
+    }
+
+    private PreparedCheckout prepared(PaymentOrder order) {
+        return new PreparedCheckout(
+                order.getId(), order.getUser().getId(), order.getTariff().getId(),
+                order.getProvider(), order.getIdempotenceKey(), order.getAmount(),
+                order.getCurrency(), order.getTariffCodeSnapshot(),
+                order.getTariffNameSnapshot(), order.getDurationDaysSnapshot(),
+                order.getStatus(), null, order.getExpiresAt());
+    }
+
+    private CreatedPayment created(String providerPaymentId) {
+        Instant now = clock.instant();
+        return new CreatedPayment(
+                providerPaymentId,
+                ProviderPaymentStatus.PENDING,
+                URI.create("https://example.invalid/fake-pay/abcdefghijklmnop"),
+                now,
+                now.plusSeconds(3600));
+    }
+
+    private PaymentCheckoutResult applyAfter(
+            CyclicBarrier start,
+            PreparedCheckout prepared,
+            CreatedPayment result
+    ) {
+        await(start);
+        return checkoutTransactionService.applyCreatedPayment(
+                prepared, result, clock.instant());
+    }
+
+    private Outcome outcome(java.util.concurrent.Future<PaymentCheckoutResult> future)
+            throws Exception {
+        try {
+            return new Outcome(true, future.get(10, TimeUnit.SECONDS), null);
+        } catch (java.util.concurrent.ExecutionException exception) {
+            return new Outcome(false, null, exception.getCause());
+        }
+    }
+
+    private record Outcome(
+            boolean success,
+            PaymentCheckoutResult result,
+            Throwable failure
+    ) {
+    }
+
     private void assertDatabaseCheck(String column, String invalidValue, long telegramId) {
         PaymentOrder saved = paymentOrderRepository.saveAndFlush(
                 order(user(telegramId), PaymentProviderType.FAKE));
@@ -388,7 +653,12 @@ class PaymentOrderRepositoryIntegrationTest {
     ) {
         PaymentOrder order = order(user, provider);
         order.markCreating(NOW.plusSeconds(1));
-        order.markPending(providerPaymentId, null, NOW, NOW.plusSeconds(2));
+        order.markPending(
+                providerPaymentId,
+                "https://example.test/payment",
+                NOW,
+                NOW.plusSeconds(3600),
+                NOW.plusSeconds(2));
         return order;
     }
 

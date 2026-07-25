@@ -21,6 +21,12 @@ telegram:
   admin-ids: ${TELEGRAM_ADMIN_IDS:}
   bot-token: ${TELEGRAM_BOT_TOKEN:}
 
+payment:
+  provider: ${PAYMENT_PROVIDER:fake}
+  pending-ttl: ${PAYMENT_PENDING_TTL:1h}
+  return-url: ${PAYMENT_RETURN_URL:https://example.invalid/payment-return}
+  allow-fake: ${PAYMENT_ALLOW_FAKE:false}
+
 vpn:
   provider:
     type: ${VPN_PROVIDER_TYPE:fake}

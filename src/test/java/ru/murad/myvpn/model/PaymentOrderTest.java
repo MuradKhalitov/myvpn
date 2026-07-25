@@ -166,13 +166,60 @@ class PaymentOrderTest {
         order.markCreating(NOW.plusSeconds(1));
         order.markPending(
                 "provider-id", "https://example.test/payment", NOW,
-                NOW.plusSeconds(2));
+                NOW.plusSeconds(3600), NOW.plusSeconds(2));
         order.markSucceeded(NOW.plusSeconds(3), NOW.plusSeconds(4));
 
         assertThat(order.getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
         assertThat(order.getPaidAt()).isEqualTo(NOW.plusSeconds(3));
         assertThat(order.getActivationStatus())
                 .isEqualTo(PaymentActivationStatus.PENDING);
+    }
+
+    @Test
+    void externalPaymentDetailsMustBeImmutableAndIdempotent() {
+        PaymentOrder order = creatingOrder();
+        Instant localExpiresAt = order.getExpiresAt();
+        Instant expiresAt = NOW.plusSeconds(3600);
+        order.markPending(
+                "provider-id", "https://example.test/payment",
+                NOW, expiresAt, NOW.plusSeconds(2));
+        Instant updatedAt = order.getUpdatedAt();
+
+        order.markPending(
+                "provider-id", "https://example.test/payment",
+                NOW, expiresAt, NOW.plusSeconds(3));
+
+        assertThat(order.getUpdatedAt()).isEqualTo(updatedAt);
+        assertThat(order.getExpiresAt()).isEqualTo(localExpiresAt);
+        assertThat(order.getProviderExpiresAt()).isEqualTo(expiresAt);
+        assertThatThrownBy(() -> order.markPending(
+                "different", "https://example.test/payment",
+                NOW, expiresAt, NOW.plusSeconds(3)))
+                .isInstanceOf(PaymentStateTransitionException.class);
+        assertThat(order.getProviderPaymentId()).isEqualTo("provider-id");
+    }
+
+    @Test
+    void markPendingValidationFailureMustNotMutateExternalDataOrLocalExpiry() {
+        PaymentOrder order = creatingOrder();
+        Instant localExpiresAt = order.getExpiresAt();
+        Instant updatedAt = order.getUpdatedAt();
+
+        assertThatThrownBy(() -> order.markPending(
+                "provider-id",
+                "https://example.test/payment",
+                NOW,
+                NOW.minusSeconds(1),
+                NOW))
+                .isInstanceOf(PaymentOrderValidationException.class);
+
+        assertThat(order.getStatus()).isEqualTo(PaymentStatus.CREATING);
+        assertThat(order.getProviderPaymentId()).isNull();
+        assertThat(order.getConfirmationUrl()).isNull();
+        assertThat(order.getProviderCreatedAt()).isNull();
+        assertThat(order.getProviderExpiresAt()).isNull();
+        assertThat(order.getExpiresAt()).isEqualTo(localExpiresAt);
+        assertThat(order.getUpdatedAt()).isEqualTo(updatedAt);
     }
 
     @Test
@@ -205,7 +252,8 @@ class PaymentOrderTest {
         failed.markFailed("SAFE", NOW.plusSeconds(5));
 
         assertThatThrownBy(() -> succeeded.markPending(
-                "other", null, NOW, NOW.plusSeconds(6)))
+                "other", "https://example.test/other", NOW,
+                NOW.plusSeconds(3600), NOW.plusSeconds(6)))
                 .isInstanceOf(PaymentStateTransitionException.class);
         assertThatThrownBy(() -> succeeded.markCanceled(NOW.plusSeconds(6)))
                 .isInstanceOf(PaymentStateTransitionException.class);
@@ -213,7 +261,9 @@ class PaymentOrderTest {
                 .isInstanceOf(PaymentStateTransitionException.class);
         assertThatThrownBy(() -> expired.markSucceeded(NOW, NOW))
                 .isInstanceOf(PaymentStateTransitionException.class);
-        assertThatThrownBy(() -> failed.markPending("id", null, NOW, NOW))
+        assertThatThrownBy(() -> failed.markPending(
+                "id", "https://example.test/id", NOW,
+                NOW.plusSeconds(3600), NOW))
                 .isInstanceOf(PaymentStateTransitionException.class);
     }
 
@@ -650,7 +700,8 @@ class PaymentOrderTest {
 
         PaymentOrder creating = creatingOrder();
         assertUnchanged(creating, () -> creating.markPending(
-                "provider-id", null, NOW, null));
+                "provider-id", "https://example.test/payment", NOW,
+                NOW.plusSeconds(3600), null));
 
         PaymentOrder canceled = pendingOrder();
         assertUnchanged(canceled, () -> canceled.markCanceled(null));
@@ -792,7 +843,7 @@ class PaymentOrderTest {
         PaymentOrder order = creatingOrder();
         order.markPending(
                 "provider-id", "https://example.test/payment", NOW,
-                NOW.plusSeconds(2));
+                NOW.plusSeconds(3600), NOW.plusSeconds(2));
         return order;
     }
 
@@ -938,7 +989,8 @@ class PaymentOrderTest {
             case NEW -> throw new PaymentStateTransitionException("No transition to NEW");
             case CREATING -> order.markCreating(NOW.plusSeconds(10));
             case PENDING -> order.markPending(
-                    "matrix-provider-id", null, NOW, NOW.plusSeconds(10));
+                    "matrix-provider-id", "https://example.test/matrix", NOW,
+                    NOW.plusSeconds(3600), NOW.plusSeconds(10));
             case SUCCEEDED -> order.markSucceeded(
                     order.getPaidAt() == null ? NOW.plusSeconds(9) : order.getPaidAt(),
                     NOW.plusSeconds(10));
@@ -1009,6 +1061,8 @@ class PaymentOrderTest {
 
     private void makePending(PaymentOrder order) {
         order.markCreating(NOW.plusSeconds(1));
-        order.markPending("provider-id", null, NOW, NOW.plusSeconds(2));
+        order.markPending(
+                "provider-id", "https://example.test/payment", NOW,
+                NOW.plusSeconds(3600), NOW.plusSeconds(2));
     }
 }

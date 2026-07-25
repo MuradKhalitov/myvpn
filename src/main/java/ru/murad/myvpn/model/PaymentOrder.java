@@ -22,6 +22,7 @@ import java.math.RoundingMode;
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -92,6 +93,9 @@ public class PaymentOrder {
 
     @Column(name = "provider_created_at")
     private Instant providerCreatedAt;
+
+    @Column(name = "provider_expires_at")
+    private Instant providerExpiresAt;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -198,20 +202,48 @@ public class PaymentOrder {
             String providerPaymentId,
             String confirmationUrl,
             Instant providerCreatedAt,
+            Instant providerExpiresAt,
             Instant now
     ) {
         requireText(providerPaymentId, "Provider payment id");
+        requireText(confirmationUrl, "Confirmation URL");
+        Objects.requireNonNull(providerCreatedAt, "providerCreatedAt");
+        Objects.requireNonNull(now, "now");
         if (providerPaymentId.length() > 128) {
             throw new PaymentOrderValidationException("Provider payment id is too long");
         }
-        if (confirmationUrl != null
-                && confirmationUrl.length() > CONFIRMATION_URL_MAX_LENGTH) {
+        if (confirmationUrl.length() > CONFIRMATION_URL_MAX_LENGTH) {
             throw new PaymentOrderValidationException("Confirmation URL is too long");
+        }
+        if (providerExpiresAt != null && !providerExpiresAt.isAfter(now)) {
+            throw new PaymentOrderValidationException(
+                    "Payment expiry must be in the future");
+        }
+        if (providerExpiresAt != null
+                && !providerExpiresAt.isAfter(providerCreatedAt)) {
+            throw new PaymentOrderValidationException(
+                    "Payment expiry must be after provider creation");
+        }
+        Instant normalizedProviderCreatedAt = providerCreatedAt
+                .truncatedTo(ChronoUnit.MICROS);
+        Instant normalizedProviderExpiresAt = providerExpiresAt == null
+                ? null : providerExpiresAt.truncatedTo(ChronoUnit.MICROS);
+        if (status == PaymentStatus.PENDING) {
+            if (providerPaymentId.equals(this.providerPaymentId)
+                    && confirmationUrl.equals(this.confirmationUrl)
+                    && normalizedProviderCreatedAt.equals(this.providerCreatedAt)
+                    && Objects.equals(normalizedProviderExpiresAt,
+                    this.providerExpiresAt)) {
+                return;
+            }
+            throw new PaymentStateTransitionException(
+                    "External payment details cannot be replaced");
         }
         transitionPayment(PaymentStatus.PENDING, now, PaymentStatus.CREATING);
         this.providerPaymentId = providerPaymentId;
         this.confirmationUrl = confirmationUrl;
-        this.providerCreatedAt = providerCreatedAt;
+        this.providerCreatedAt = normalizedProviderCreatedAt;
+        this.providerExpiresAt = normalizedProviderExpiresAt;
     }
 
     public void markSucceeded(Instant confirmedPaidAt, Instant now) {

@@ -3,3 +3,6 @@ spring:
     url: jdbc:postgresql://localhost:5454/myvpn
     username: myvpn
     password: myvpn
+
+payment:
+  allow-fake: true
