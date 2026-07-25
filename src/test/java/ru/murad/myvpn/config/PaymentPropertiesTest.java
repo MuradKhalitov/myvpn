@@ -70,6 +70,22 @@ class PaymentPropertiesTest {
     }
 
     @Test
+    void verificationIntervalAndClockSkewBoundariesAreValidated() {
+        assertThatCode(() -> verification(Duration.ofNanos(1), Duration.ZERO))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> verification(Duration.ofMinutes(5), Duration.ofMinutes(15)))
+                .doesNotThrowAnyException();
+        for (Duration interval : new Duration[]{Duration.ZERO, Duration.ofMinutes(5).plusNanos(1), null}) {
+            assertThatThrownBy(() -> verification(interval, Duration.ZERO))
+                    .isInstanceOf(PaymentOrderValidationException.class);
+        }
+        for (Duration skew : new Duration[]{Duration.ofNanos(-1), Duration.ofMinutes(15).plusNanos(1), null}) {
+            assertThatThrownBy(() -> verification(Duration.ofNanos(1), skew))
+                    .isInstanceOf(PaymentOrderValidationException.class);
+        }
+    }
+
+    @Test
     void springContextMustRequireExplicitFakeFlagForEveryProfile() {
         for (String profile : new String[]{"local", "test"}) {
             contextRunner.withPropertyValues(
@@ -111,6 +127,11 @@ class PaymentPropertiesTest {
             boolean allowFake
     ) {
         return new PaymentProperties(provider, ttl, RETURN_URL, allowFake);
+    }
+
+    private PaymentProperties verification(Duration interval, Duration skew) {
+        return new PaymentProperties(PaymentProviderType.FAKE, Duration.ofHours(1),
+                RETURN_URL, true, new PaymentProperties.Verification(interval, skew));
     }
 
     @Configuration(proxyBeanMethods = false)

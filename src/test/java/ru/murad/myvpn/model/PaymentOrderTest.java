@@ -29,6 +29,7 @@ class PaymentOrderTest {
             "CREATING->FAILED", "CREATING->MANUAL_REVIEW_REQUIRED",
             "PENDING->SUCCEEDED", "PENDING->CANCELED", "PENDING->EXPIRED",
             "PENDING->FAILED", "PENDING->MANUAL_REVIEW_REQUIRED",
+            "MANUAL_REVIEW_REQUIRED->FAILED",
             "SUCCEEDED->SUCCEEDED");
     private static final Set<String> ALLOWED_ACTIVATION_TRANSITIONS = Set.of(
             "NOT_READY->PENDING",
@@ -138,6 +139,58 @@ class PaymentOrderTest {
             assertThatThrownBy(() -> applyPaymentTransition(order, to))
                     .isInstanceOf(PaymentStateTransitionException.class);
             assertThat(order.getStatus()).isEqualTo(from);
+        }
+    }
+
+    @Test
+    void reserveVerificationOverflowIsAtomicInMemory() {
+        PaymentOrder order = orderInPaymentStatus(PaymentStatus.PENDING);
+        Instant originalNext = NOW.plusSeconds(30);
+        Instant originalUpdated = NOW;
+        ReflectionTestUtils.setField(order, "verificationAttempts", Integer.MAX_VALUE);
+        ReflectionTestUtils.setField(order, "nextVerificationAt", originalNext);
+        ReflectionTestUtils.setField(order, "updatedAt", originalUpdated);
+
+        assertThatThrownBy(() -> order.reserveVerification(NOW.plusSeconds(60), Duration.ofSeconds(5)))
+                .isInstanceOf(PaymentOrderValidationException.class);
+
+        assertThat(order.getVerificationAttempts()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(order.getNextVerificationAt()).isEqualTo(originalNext);
+        assertThat(order.getUpdatedAt()).isEqualTo(originalUpdated);
+        assertThat(order.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(order.getActivationStatus()).isEqualTo(PaymentActivationStatus.NOT_READY);
+        assertThat(order.getPaidAt()).isNull();
+        assertThat(order.getSafeFailureCode()).isNull();
+    }
+
+    @Test
+    void reserveVerificationTimestampOverflowIsAtomicInMemory() {
+        PaymentOrder order = orderInPaymentStatus(PaymentStatus.PENDING);
+        Instant originalNext = NOW.minusSeconds(1);
+        Instant originalUpdated = NOW;
+        ReflectionTestUtils.setField(order, "nextVerificationAt", originalNext);
+        ReflectionTestUtils.setField(order, "updatedAt", originalUpdated);
+
+        assertThatThrownBy(() -> order.reserveVerification(Instant.MAX, Duration.ofSeconds(1)))
+                .isInstanceOf(PaymentOrderValidationException.class);
+
+        assertThat(order.getVerificationAttempts()).isZero();
+        assertThat(order.getNextVerificationAt()).isEqualTo(originalNext);
+        assertThat(order.getUpdatedAt()).isEqualTo(originalUpdated);
+    }
+
+    @Test
+    void reserveVerificationRejectsInvalidArgumentsWithoutMutation() {
+        for (Instant now : new Instant[]{null, NOW}) {
+            for (Duration interval : new Duration[]{null, Duration.ZERO, Duration.ofNanos(-1)}) {
+                PaymentOrder order = orderInPaymentStatus(PaymentStatus.PENDING);
+                Instant originalUpdated = order.getUpdatedAt();
+                assertThatThrownBy(() -> order.reserveVerification(now, interval))
+                        .isInstanceOf(PaymentOrderValidationException.class);
+                assertThat(order.getVerificationAttempts()).isZero();
+                assertThat(order.getNextVerificationAt()).isNull();
+                assertThat(order.getUpdatedAt()).isEqualTo(originalUpdated);
+            }
         }
     }
 

@@ -26,6 +26,9 @@ payment:
   pending-ttl: ${PAYMENT_PENDING_TTL:1h}
   return-url: ${PAYMENT_RETURN_URL:https://example.invalid/payment-return}
   allow-fake: ${PAYMENT_ALLOW_FAKE:false}
+  verification:
+    min-interval: ${PAYMENT_VERIFICATION_MIN_INTERVAL:5s}
+    max-clock-skew: ${PAYMENT_MAX_CLOCK_SKEW:5m}
 
 vpn:
   provider:

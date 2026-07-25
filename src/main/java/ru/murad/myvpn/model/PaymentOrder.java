@@ -280,7 +280,8 @@ public class PaymentOrder {
     public void markFailed(String failureCode, Instant now) {
         String validatedCode = validateFailureCode(failureCode);
         transitionPayment(PaymentStatus.FAILED, now,
-                PaymentStatus.NEW, PaymentStatus.CREATING, PaymentStatus.PENDING);
+                PaymentStatus.NEW, PaymentStatus.CREATING, PaymentStatus.PENDING,
+                PaymentStatus.MANUAL_REVIEW_REQUIRED);
         safeFailureCode = validatedCode;
     }
 
@@ -289,6 +290,36 @@ public class PaymentOrder {
         transitionPayment(PaymentStatus.MANUAL_REVIEW_REQUIRED, now,
                 PaymentStatus.CREATING, PaymentStatus.PENDING);
         safeFailureCode = validatedCode;
+    }
+
+    public boolean reserveVerification(Instant now, Duration interval) {
+        if (now == null) {
+            throw new PaymentOrderValidationException("Verification time must not be null");
+        }
+        if (interval == null || interval.isZero() || interval.isNegative()) {
+            throw new PaymentOrderValidationException("Verification interval must be positive");
+        }
+        if (nextVerificationAt != null && nextVerificationAt.isAfter(now)) {
+            return false;
+        }
+        int newVerificationAttempts;
+        Instant newNextVerificationAt;
+        try {
+            newVerificationAttempts = Math.incrementExact(verificationAttempts);
+        } catch (ArithmeticException ex) {
+            throw new PaymentOrderValidationException("Verification attempts limit reached");
+        }
+        try {
+            newNextVerificationAt = now.plus(interval);
+        } catch (DateTimeException ex) {
+            throw new PaymentOrderValidationException("Verification interval cannot be applied");
+        } catch (ArithmeticException ex) {
+            throw new PaymentOrderValidationException("Verification interval cannot be applied");
+        }
+        verificationAttempts = newVerificationAttempts;
+        nextVerificationAt = newNextVerificationAt.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        updatedAt = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        return true;
     }
 
     /**

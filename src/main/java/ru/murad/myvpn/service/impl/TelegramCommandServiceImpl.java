@@ -1,5 +1,6 @@
 package ru.murad.myvpn.service.impl;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import ru.murad.myvpn.config.PaymentProperties;
@@ -28,6 +29,9 @@ import ru.murad.myvpn.service.FakePaymentControlService;
 import ru.murad.myvpn.service.FakePaymentRecoveryService;
 import ru.murad.myvpn.client.PaymentConfirmationUrl;
 import ru.murad.myvpn.service.PaymentCheckoutService;
+import ru.murad.myvpn.service.PaymentVerificationService;
+import ru.murad.myvpn.dto.PaymentVerificationOutcome;
+import ru.murad.myvpn.dto.PaymentVerificationResult;
 import ru.murad.myvpn.service.SubscriptionService;
 import ru.murad.myvpn.service.TariffService;
 import ru.murad.myvpn.service.TelegramCommandService;
@@ -38,8 +42,32 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 @Service
-@RequiredArgsConstructor
 public class TelegramCommandServiceImpl implements TelegramCommandService {
+
+    @Autowired
+    public TelegramCommandServiceImpl(UserService userService, TariffService tariffService,
+            SubscriptionService subscriptionService, AdminAuthorizationService adminAuthorizationService,
+            PaymentCheckoutService paymentCheckoutService, PaymentVerificationService paymentVerificationService,
+            PaymentProperties paymentProperties, TelegramUserRepository telegramUserRepository,
+            PaymentOrderRepository paymentOrderRepository, Optional<FakePaymentControlService> fakePaymentControlService,
+            Optional<FakePaymentRecoveryService> fakePaymentRecoveryService) {
+        this.userService = userService; this.tariffService = tariffService; this.subscriptionService = subscriptionService;
+        this.adminAuthorizationService = adminAuthorizationService; this.paymentCheckoutService = paymentCheckoutService;
+        this.paymentVerificationService = paymentVerificationService; this.paymentProperties = paymentProperties;
+        this.telegramUserRepository = telegramUserRepository; this.paymentOrderRepository = paymentOrderRepository;
+        this.fakePaymentControlService = fakePaymentControlService; this.fakePaymentRecoveryService = fakePaymentRecoveryService;
+    }
+
+    public TelegramCommandServiceImpl(UserService userService, TariffService tariffService,
+            SubscriptionService subscriptionService, AdminAuthorizationService adminAuthorizationService,
+            PaymentCheckoutService paymentCheckoutService, PaymentProperties paymentProperties,
+            TelegramUserRepository telegramUserRepository, PaymentOrderRepository paymentOrderRepository,
+            Optional<FakePaymentControlService> fakePaymentControlService,
+            Optional<FakePaymentRecoveryService> fakePaymentRecoveryService) {
+        this(userService, tariffService, subscriptionService, adminAuthorizationService,
+                paymentCheckoutService, null, paymentProperties, telegramUserRepository,
+                paymentOrderRepository, fakePaymentControlService, fakePaymentRecoveryService);
+    }
 
     private static final Pattern TARIFF_CALLBACK_CODE =
             Pattern.compile("[A-Z0-9_-]{1,32}");
@@ -58,6 +86,7 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
     private final SubscriptionService subscriptionService;
     private final AdminAuthorizationService adminAuthorizationService;
     private final PaymentCheckoutService paymentCheckoutService;
+    private final PaymentVerificationService paymentVerificationService;
     private final PaymentProperties paymentProperties;
     private final TelegramUserRepository telegramUserRepository;
     private final PaymentOrderRepository paymentOrderRepository;
@@ -118,9 +147,12 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
                         callback.telegramId(), tariffCode));
             }
             if ("payment:check".equals(callback.data())) {
-                return TelegramCommandResponse.text(formatProviderStatus(
-                        paymentCheckoutService.checkCurrentPayment(
-                                callback.telegramId())));
+                if (paymentVerificationService == null) {
+                    return TelegramCommandResponse.text(formatProviderStatus(
+                            paymentCheckoutService.checkCurrentPayment(callback.telegramId())));
+                }
+                return TelegramCommandResponse.text(formatVerificationStatus(
+                        paymentVerificationService.verifyCurrentPayment(callback.telegramId())));
             }
             return TelegramCommandResponse.text("Неизвестное действие.");
         } catch (FakePaymentStateLostException exception) {
@@ -219,6 +251,24 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
             return "Платёж отменён";
         }
         return "Ожидает оплаты";
+    }
+
+    private String formatVerificationStatus(PaymentVerificationResult result) {
+        return switch (result.outcome()) {
+            case SUCCEEDED, ALREADY_SUCCEEDED -> formatProviderStatus(new ProviderPayment("x", ProviderPaymentStatus.SUCCEEDED,
+                    true, java.math.BigDecimal.ONE, "RUB", "fake", null, null, java.time.Instant.EPOCH, java.time.Instant.EPOCH))
+                    + " РџРѕРґРїРёСЃРєР° РѕР¶РёРґР°РµС‚ Р°РєС‚РёРІР°С†РёРё.";
+            case CANCELED, ALREADY_CANCELED -> "РџР»Р°С‚РµР¶ РѕС‚РјРµРЅС‘РЅ.";
+            case TOO_EARLY -> "РџСЂРѕРІРµСЂРєР° СѓР¶Рµ РІС‹РїРѕР»РЅСЏР»Р°СЃСЊ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РЅРµРјРЅРѕРіРѕ РїРѕР·Р¶Рµ.";
+            case MANUAL_REVIEW_REQUIRED -> "РџР»Р°С‚С‘Р¶ С‚СЂРµР±СѓРµС‚ СЂСѓС‡РЅРѕР№ РїСЂРѕРІРµСЂРєРё.";
+            case PROVIDER_UNAVAILABLE, PROVIDER_RESULT_UNCERTAIN -> "РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕРІРµСЂРёС‚СЊ РїР»Р°С‚С‘Р¶. РџРѕРїСЂРѕР±СѓР№С‚Рµ РїРѕР·Р¶Рµ.";
+            case CHECKOUT_INCOMPLETE -> "РЎРѕР·РґР°РЅРёРµ РїР»Р°С‚РµР¶Р° РµС‰С‘ РЅРµ Р·Р°РІРµСЂС€РµРЅРѕ.";
+            case STILL_PENDING -> formatProviderStatus(new ProviderPayment("x", ProviderPaymentStatus.PENDING,
+                    false, java.math.BigDecimal.ONE, "RUB", "fake", null, null, java.time.Instant.EPOCH, null));
+            case NOT_FOUND -> "РџР»Р°С‚С‘Р¶ РЅРµ РЅР°Р№РґРµРЅ.";
+            case TERMINAL -> "Р­С‚РѕС‚ РїР»Р°С‚С‘Р¶ Р±РѕР»СЊС€Рµ РЅРµР»СЊР·СЏ РїСЂРѕРІРµСЂРёС‚СЊ.";
+            case AMBIGUOUS_PAYMENT_STATE -> "РћР±РЅР°СЂСѓР¶РµРЅРѕ РЅРµСЃРєРѕР»СЊРєРѕ РЅРµР·Р°РІРµСЂС€С‘РЅРЅС‹С… РїР»Р°С‚РµР¶РµР№. РўСЂРµР±СѓРµС‚СЃСЏ СЂСѓС‡РЅР°СЏ РїСЂРѕРІРµСЂРєР°.";
+        };
     }
 
     private String tariffs() {

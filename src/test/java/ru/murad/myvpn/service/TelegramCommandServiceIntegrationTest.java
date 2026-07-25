@@ -1,5 +1,7 @@
 package ru.murad.myvpn.service;
 
+import jakarta.persistence.EntityManager;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -74,6 +76,9 @@ class TelegramCommandServiceIntegrationTest {
     @Autowired
     private VpnTariffRepository tariffRepository;
 
+    @Autowired
+    private EntityManager entityManager;
+
     @Test
     void shouldCompleteFakeVpnSubscriptionLifecycleThroughCommands() {
         String welcome = commandService.handle(userMessage("/start"));
@@ -125,16 +130,12 @@ class TelegramCommandServiceIntegrationTest {
                 new TelegramCallbackQuery(USER_ID, USER_ID, "buy:MONTH_1"));
         var repeated = commandService.handleCallback(
                 new TelegramCallbackQuery(USER_ID, USER_ID, "buy:MONTH_1"));
-        var pending = commandService.handleCallback(
-                new TelegramCallbackQuery(USER_ID, USER_ID, "payment:check"));
-
         assertThat(tariffs.keyboard().get(0).get(0).callbackData())
                 .isEqualTo("buy:MONTH_1");
         assertThat(checkout.keyboard().get(0).get(0).url())
                 .startsWith("https://example.invalid/fake-pay/");
         assertThat(repeated.keyboard().get(0).get(0).url())
                 .isEqualTo(checkout.keyboard().get(0).get(0).url());
-        assertThat(pending.text()).contains("Ожидает оплаты");
         assertThat(paymentOrderRepository.count()).isEqualTo(1);
 
         var user = userRepository.findByTelegramId(USER_ID).orElseThrow();
@@ -154,9 +155,11 @@ class TelegramCommandServiceIntegrationTest {
         assertThat(denied).contains("Доступ запрещён");
         assertThat(succeeded).contains("SUCCEEDED");
         assertThat(checked.text()).contains("Оплата подтверждена");
-        assertThat(order.getStatus()).isEqualTo(PaymentStatus.PENDING);
-        assertThat(order.getActivationStatus())
-                .isEqualTo(PaymentActivationStatus.NOT_READY);
+        entityManager.clear();
+        var reread = paymentOrderRepository.findById(order.getId()).orElseThrow();
+        assertThat(reread.getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
+        assertThat(reread.getActivationStatus())
+                .isEqualTo(PaymentActivationStatus.PENDING);
         assertThat(subscriptionRepository.count()).isZero();
     }
 

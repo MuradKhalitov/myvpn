@@ -12,6 +12,7 @@ import ru.murad.myvpn.model.PaymentStatus;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, UUID> {
@@ -37,6 +38,9 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, UUID
                         PaymentStatus.PENDING,
                         PaymentStatus.MANUAL_REVIEW_REQUIRED));
     }
+
+    @Query("select p from PaymentOrder p where p.user.id = :userId order by p.createdAt desc")
+    List<PaymentOrder> findAllByUserOrderByCreatedAtDesc(@Param("userId") UUID userId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select paymentOrder from PaymentOrder paymentOrder where paymentOrder.id = :id")
