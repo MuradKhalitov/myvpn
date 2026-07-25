@@ -1,0 +1,132 @@
+databaseChangeLog:
+  - changeSet:
+      id: 007-create-payment-orders
+      author: myvpn
+      changes:
+        - createTable:
+            tableName: payment_orders
+            columns:
+              - column: { name: id, type: uuid, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: user_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: tariff_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: subscription_id, type: uuid }
+              - column: { name: provider, type: varchar(32), constraints: { nullable: false } }
+              - column: { name: provider_payment_id, type: varchar(128) }
+              - column: { name: idempotence_key, type: uuid, constraints: { nullable: false } }
+              - column: { name: amount, type: "numeric(19,2)", constraints: { nullable: false } }
+              - column: { name: currency, type: varchar(3), constraints: { nullable: false } }
+              - column: { name: status, type: varchar(32), constraints: { nullable: false } }
+              - column: { name: activation_status, type: varchar(32), constraints: { nullable: false } }
+              - column: { name: confirmation_url, type: text }
+              - column: { name: tariff_code_snapshot, type: varchar(64), constraints: { nullable: false } }
+              - column: { name: tariff_name_snapshot, type: varchar(128), constraints: { nullable: false } }
+              - column: { name: duration_days_snapshot, type: integer, constraints: { nullable: false } }
+              - column: { name: provider_created_at, type: "timestamp with time zone" }
+              - column: { name: created_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: updated_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: expires_at, type: "timestamp with time zone", constraints: { nullable: false } }
+              - column: { name: paid_at, type: "timestamp with time zone" }
+              - column: { name: next_verification_at, type: "timestamp with time zone" }
+              - column: { name: verification_attempts, type: integer, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: activation_target_expires_at, type: "timestamp with time zone" }
+              - column: { name: activation_lease_until, type: "timestamp with time zone" }
+              - column: { name: activation_claim_token, type: uuid }
+              - column: { name: activation_generation, type: bigint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: activation_attempts, type: integer, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: safe_failure_code, type: varchar(64) }
+              - column: { name: version, type: bigint, defaultValueNumeric: 0, constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            baseTableName: payment_orders
+            baseColumnNames: user_id
+            referencedTableName: telegram_users
+            referencedColumnNames: id
+            constraintName: fk_payment_orders_user
+        - addForeignKeyConstraint:
+            baseTableName: payment_orders
+            baseColumnNames: tariff_id
+            referencedTableName: vpn_tariffs
+            referencedColumnNames: id
+            constraintName: fk_payment_orders_tariff
+        - addForeignKeyConstraint:
+            baseTableName: payment_orders
+            baseColumnNames: subscription_id
+            referencedTableName: subscriptions
+            referencedColumnNames: id
+            constraintName: fk_payment_orders_subscription
+        - addUniqueConstraint:
+            tableName: payment_orders
+            columnNames: provider, provider_payment_id
+            constraintName: uk_payment_orders_provider_payment
+        - addUniqueConstraint:
+            tableName: payment_orders
+            columnNames: idempotence_key
+            constraintName: uk_payment_orders_idempotence_key
+        - sql:
+            sql: >
+              ALTER TABLE payment_orders
+              ADD CONSTRAINT chk_payment_orders_amount_positive CHECK (amount > 0),
+              ADD CONSTRAINT chk_payment_orders_currency_rub CHECK (currency = 'RUB'),
+              ADD CONSTRAINT chk_payment_orders_duration_positive
+                CHECK (duration_days_snapshot > 0),
+              ADD CONSTRAINT chk_payment_orders_verification_attempts
+                CHECK (verification_attempts >= 0),
+              ADD CONSTRAINT chk_payment_orders_activation_attempts
+                CHECK (activation_attempts >= 0),
+              ADD CONSTRAINT chk_payment_orders_activation_generation
+                CHECK (activation_generation >= 0),
+              ADD CONSTRAINT chk_payment_orders_confirmation_url_length
+                CHECK (confirmation_url IS NULL OR length(confirmation_url) <= 2048)
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_status
+            columns:
+              - column: { name: status }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_activation_status
+            columns:
+              - column: { name: activation_status }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_expires_at
+            columns:
+              - column: { name: expires_at }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_next_verification_at
+            columns:
+              - column: { name: next_verification_at }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_activation_lease_until
+            columns:
+              - column: { name: activation_lease_until }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_user
+            columns:
+              - column: { name: user_id }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_tariff
+            columns:
+              - column: { name: tariff_id }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_subscription
+            columns:
+              - column: { name: subscription_id }
+        - sql:
+            sql: >
+              CREATE UNIQUE INDEX uk_payment_order_open_user
+              ON payment_orders (user_id)
+              WHERE status IN (
+                'NEW',
+                'CREATING',
+                'PENDING',
+                'MANUAL_REVIEW_REQUIRED'
+              )
+      rollback:
+        - dropTable:
+            tableName: payment_orders
+            cascadeConstraints: true

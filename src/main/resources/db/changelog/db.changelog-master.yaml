@@ -11,3 +11,5 @@ databaseChangeLog:
       file: db/changelog/changes/005-harden-subscription-provisioning.yaml
   - include:
       file: db/changelog/changes/006-fence-subscription-recovery.yaml
+  - include:
+      file: db/changelog/changes/007-create-payment-orders.yaml
