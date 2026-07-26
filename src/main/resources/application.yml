@@ -38,6 +38,14 @@ payment:
     max-attempts: ${PAYMENT_ACTIVATION_MAX_ATTEMPTS:5}
 
 vpn:
+  delivery:
+    enabled: ${VPN_DELIVERY_ENABLED:false}
+    batch-size: ${VPN_DELIVERY_BATCH_SIZE:10}
+    fixed-delay: ${VPN_DELIVERY_FIXED_DELAY:5s}
+    lease-duration: ${VPN_DELIVERY_LEASE_DURATION:2m}
+    max-attempts: ${VPN_DELIVERY_MAX_ATTEMPTS:5}
+    retry-initial-delay: ${VPN_DELIVERY_RETRY_INITIAL_DELAY:5s}
+    retry-max-delay: ${VPN_DELIVERY_RETRY_MAX_DELAY:5m}
   provider:
     type: ${VPN_PROVIDER_TYPE:fake}
     allow-fake: ${VPN_PROVIDER_ALLOW_FAKE:false}

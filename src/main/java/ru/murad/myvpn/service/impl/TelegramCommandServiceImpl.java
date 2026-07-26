@@ -36,6 +36,7 @@ import ru.murad.myvpn.service.SubscriptionService;
 import ru.murad.myvpn.service.TariffService;
 import ru.murad.myvpn.service.TelegramCommandService;
 import ru.murad.myvpn.service.UserService;
+import ru.murad.myvpn.service.VpnConfigurationCommandService;
 
 import java.util.List;
 import java.util.Optional;
@@ -50,12 +51,14 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
             PaymentCheckoutService paymentCheckoutService, PaymentVerificationService paymentVerificationService,
             PaymentProperties paymentProperties, TelegramUserRepository telegramUserRepository,
             PaymentOrderRepository paymentOrderRepository, Optional<FakePaymentControlService> fakePaymentControlService,
-            Optional<FakePaymentRecoveryService> fakePaymentRecoveryService) {
+            Optional<FakePaymentRecoveryService> fakePaymentRecoveryService,
+            Optional<VpnConfigurationCommandService> vpnConfigurationCommandService) {
         this.userService = userService; this.tariffService = tariffService; this.subscriptionService = subscriptionService;
         this.adminAuthorizationService = adminAuthorizationService; this.paymentCheckoutService = paymentCheckoutService;
         this.paymentVerificationService = paymentVerificationService; this.paymentProperties = paymentProperties;
         this.telegramUserRepository = telegramUserRepository; this.paymentOrderRepository = paymentOrderRepository;
         this.fakePaymentControlService = fakePaymentControlService; this.fakePaymentRecoveryService = fakePaymentRecoveryService;
+        this.vpnConfigurationCommandService = vpnConfigurationCommandService;
     }
 
     public TelegramCommandServiceImpl(UserService userService, TariffService tariffService,
@@ -66,7 +69,7 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
             Optional<FakePaymentRecoveryService> fakePaymentRecoveryService) {
         this(userService, tariffService, subscriptionService, adminAuthorizationService,
                 paymentCheckoutService, null, paymentProperties, telegramUserRepository,
-                paymentOrderRepository, fakePaymentControlService, fakePaymentRecoveryService);
+                paymentOrderRepository, fakePaymentControlService, fakePaymentRecoveryService, Optional.empty());
     }
 
     private static final Pattern TARIFF_CALLBACK_CODE =
@@ -92,6 +95,7 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
     private final PaymentOrderRepository paymentOrderRepository;
     private final Optional<FakePaymentControlService> fakePaymentControlService;
     private final Optional<FakePaymentRecoveryService> fakePaymentRecoveryService;
+    private final Optional<VpnConfigurationCommandService> vpnConfigurationCommandService;
 
     @Override
     public String handle(TelegramIncomingMessage message) {
@@ -110,6 +114,9 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
                 case "/tariffs" -> TelegramCommandResponse.text(tariffs());
                 case "/subscription" ->
                         TelegramCommandResponse.text(subscription(message.telegramId()));
+                case "/vpn" -> TelegramCommandResponse.text(vpnConfigurationCommandService
+                        .map(service -> service.configurationForOwner(message))
+                        .orElse("Не удалось получить VPN-конфигурацию. Обратитесь в поддержку."));
                 case "/help" -> TelegramCommandResponse.text(HELP);
                 case "/activate" ->
                         TelegramCommandResponse.text(activate(message.telegramId(), parts));
@@ -321,11 +328,12 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
     private String formatSubscription(SubscriptionDto subscription) {
         String configuration = subscription.configurationData() == null
                 ? "Конфигурация недоступна"
-                : subscription.configurationData();
+                : "Configuration available";
         return "Тариф: " + subscription.tariff().name()
                 + "\nДействует до: " + subscription.expiresAt()
                 + "\nПровайдер: " + subscription.providerName()
-                + "\nКонфигурация:\n" + configuration;
+                + "\nConfiguration: " + configuration
+                + "\nFor configuration use /vpn in a private chat.";
     }
 
     private void requireArguments(String[] parts, int count, String usage) {

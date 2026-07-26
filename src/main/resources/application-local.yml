@@ -8,5 +8,7 @@ payment:
   allow-fake: true
 
 vpn:
+  delivery:
+    enabled: ${VPN_DELIVERY_ENABLED:false}
   provider:
     allow-fake: true

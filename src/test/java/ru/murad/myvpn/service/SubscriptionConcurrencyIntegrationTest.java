@@ -525,33 +525,33 @@ class SubscriptionConcurrencyIntegrationTest {
                         SubscriptionStatus.MANUAL_REVIEW_REQUIRED, 7202L);
                 connection.commit();
 
-                liquibase.rollback(3, new Contexts(), new LabelExpression());
-                statement.execute("SET search_path TO " + schema);
-                assertThat(resultValue(statement, """
-                        SELECT count(*)::text FROM information_schema.columns
-                        WHERE table_schema='%s' AND table_name='payment_orders'
-                          AND column_name='provider_expires_at'
-                        """.formatted(schema))).isEqualTo("0");
-                assertThat(resultValue(statement, """
-                        SELECT count(*)::text FROM information_schema.tables
-                        WHERE table_schema='%s' AND table_name='payment_orders'
-                        """.formatted(schema))).isEqualTo("1");
-                liquibase.update(3, new Contexts(), new LabelExpression());
-                statement.execute("SET search_path TO " + schema);
-                assertThat(resultValue(statement, """
-                        SELECT count(*)::text FROM information_schema.columns
-                        WHERE table_schema='%s' AND table_name='payment_orders'
-                          AND column_name='provider_expires_at'
-                        """.formatted(schema))).isEqualTo("1");
                 liquibase.rollback(4, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
+                        SELECT count(*)::text FROM information_schema.columns
+                        WHERE table_schema='%s' AND table_name='payment_orders'
+                          AND column_name='provider_expires_at'
+                        """.formatted(schema))).isEqualTo("0");
+                assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.tables
                         WHERE table_schema='%s' AND table_name='payment_orders'
-                        """.formatted(schema))).isEqualTo("0");
+                        """.formatted(schema))).isEqualTo("1");
                 liquibase.update(4, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
+                        SELECT count(*)::text FROM information_schema.columns
+                        WHERE table_schema='%s' AND table_name='payment_orders'
+                          AND column_name='provider_expires_at'
+                        """.formatted(schema))).isEqualTo("1");
+                liquibase.rollback(5, new Contexts(), new LabelExpression());
+                statement.execute("SET search_path TO " + schema);
+                assertThat(resultValue(statement, """
+                        SELECT count(*)::text FROM information_schema.tables
+                        WHERE table_schema='%s' AND table_name='payment_orders'
+                        """.formatted(schema))).isEqualTo("0");
+                liquibase.update(5, new Contexts(), new LabelExpression());
+                statement.execute("SET search_path TO " + schema);
+                assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.tables
                         WHERE table_schema='%s' AND table_name='payment_orders'
                         """.formatted(schema))).isEqualTo("1");
@@ -560,7 +560,7 @@ class SubscriptionConcurrencyIntegrationTest {
                         WHERE table_schema='%s' AND table_name='payment_orders'
                           AND column_name='provider_expires_at'
                         """.formatted(schema))).isEqualTo("1");
-                liquibase.rollback(4, new Contexts(), new LabelExpression());
+                liquibase.rollback(5, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
 
                 assertThatThrownBy(() -> liquibase.rollback(

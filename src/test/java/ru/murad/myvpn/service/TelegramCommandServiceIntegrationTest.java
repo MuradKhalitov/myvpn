@@ -91,7 +91,8 @@ class TelegramCommandServiceIntegrationTest {
         assertThat(welcome).contains("My VPN", "/tariffs", "/subscription");
         assertThat(tariffs).contains("MONTH_1", "90.00 RUB", "YEAR_1", "720.00 RUB");
         assertThat(activation).isNotBlank();
-        assertThat(subscription).contains("FAKE", "fake-vpn://");
+        assertThat(subscription).contains("FAKE", "/vpn").doesNotContain("fake-vpn://");
+        assertThat(userDetails).doesNotContain("fake-vpn://");
         assertThat(userDetails).contains(String.valueOf(USER_ID), "@integration_user", "FAKE");
         assertThat(revocation).isNotBlank();
 
@@ -119,6 +120,59 @@ class TelegramCommandServiceIntegrationTest {
         assertThat(response).isNotBlank();
         assertThat(subscriptionRepository.count()).isZero();
         assertThat(vpnAccessRepository.count()).isZero();
+    }
+
+    @Test
+    void vpnCommandReturnsOnlyCurrentOwnersConfigurationInPrivateChat() {
+        commandService.handle(userMessage("/start"));
+        commandService.handle(adminMessage("/activate " + USER_ID + " MONTH_1"));
+
+        String privateResponse = commandService.handle(userMessage("/vpn"));
+        String groupResponse = commandService.handle(new TelegramIncomingMessage(
+                USER_ID, 999_999L, "integration_user", "Integration", "User", "/vpn"));
+
+        assertThat(privateResponse).contains("fake-vpn://", "Действует до");
+        assertThat(groupResponse).doesNotContain("fake-vpn://").contains("личном чате");
+    }
+
+    @Test
+    void legacySubscriptionAndAdminCommandsNeverExposeConfigurationInAnyChat() {
+        commandService.handle(userMessage("/start"));
+        commandService.handle(adminMessage("/activate " + USER_ID + " MONTH_1"));
+        String privateSubscription = commandService.handle(userMessage("/subscription"));
+        String groupSubscription = commandService.handle(new TelegramIncomingMessage(
+                USER_ID, 777_777L, "integration_user", "Integration", "User", "/subscription"));
+        String adminUser = commandService.handle(adminMessage("/user " + USER_ID));
+        assertThat(privateSubscription).doesNotContain("fake-vpn://").contains("/vpn");
+        assertThat(groupSubscription).doesNotContain("fake-vpn://").contains("/vpn");
+        assertThat(adminUser).doesNotContain("fake-vpn://");
+    }
+
+    @Test
+    void vpnCommandDoesNotExposeAnotherUsersConfiguration() {
+        commandService.handle(userMessage("/start"));
+        commandService.handle(adminMessage("/activate " + USER_ID + " MONTH_1"));
+        String foreignResponse = commandService.handle(new TelegramIncomingMessage(
+                201L, 201L, "other", "Other", "User", "/vpn"));
+        assertThat(foreignResponse).doesNotContain("fake-vpn://");
+    }
+
+    @Test
+    void vpnCommandRejectsOversizedConfigurationWithoutReturningItsPrefix() {
+        commandService.handle(userMessage("/start"));
+        commandService.handle(adminMessage("/activate " + USER_ID + " MONTH_1"));
+        var subscription = subscriptionRepository.findFirstByUserTelegramIdAndStatusOrderByExpiresAtDesc(
+                USER_ID, SubscriptionStatus.ACTIVE).orElseThrow();
+        entityManager.createNativeQuery("update vpn_accesses set configuration_data=? where subscription_id=?")
+                .setParameter(1, "fake-vpn://" + "x".repeat(5_000))
+                .setParameter(2, subscription.getId())
+                .executeUpdate();
+        entityManager.clear();
+
+        String response = commandService.handle(userMessage("/vpn"));
+
+        assertThat(response).doesNotContain("fake-vpn://");
+        assertThat(response.length()).isLessThanOrEqualTo(4096);
     }
 
     @Test

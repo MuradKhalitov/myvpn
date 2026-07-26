@@ -12,6 +12,7 @@ import ru.murad.myvpn.model.*;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
+import ru.murad.myvpn.repository.VpnDeliveryRepository;
 import ru.murad.myvpn.repository.VpnTariffRepository;
 import ru.murad.myvpn.service.*;
 
@@ -19,6 +20,9 @@ import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 @Service
 @RequiredArgsConstructor
@@ -27,6 +31,7 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
     private final SubscriptionRepository subscriptions;
     private final VpnAccessRepository accesses;
     private final VpnTariffRepository tariffs;
+    private final VpnDeliveryRepository deliveries;
     private final PaymentProperties properties;
     private final VpnProvider vpnProvider;
 
@@ -122,7 +127,7 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
             subscriptions.save(subscription);
             VpnAccess access = VpnAccess.builder().id(UUID.randomUUID()).subscription(subscription)
                     .providerName(result.providerName()).externalAccessId(result.externalAccessId())
-                    .configurationData("3X_UI".equals(result.providerName()) ? null : result.configurationData())
+                    .configurationData(result.configurationData())
                     .status(VpnAccessStatus.ACTIVE).issuedAt(now).createdAt(now).updatedAt(now).build();
             accesses.save(access);
             order.attachSubscription(subscription, now);
@@ -140,6 +145,17 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
             subscription.setActivationTarget(tariff, order.getUser().getTelegramId(), p.targetExpiresAt(), now);
             subscriptions.save(subscription);
         }
+        VpnAccess deliveryAccess = p.action() == PaymentActivationAction.PROVISION
+                ? accesses.findBySubscriptionId(subscription.getId()).orElseThrow(PaymentNotFoundException::new)
+                : accesses.findByIdForUpdate(p.existingVpnAccessId()).orElseThrow(PaymentNotFoundException::new);
+        if (deliveryAccess.getConfigurationData() == null || deliveryAccess.getConfigurationData().isBlank()) {
+            throw new PaymentOrderValidationException("VPN configuration is unavailable for delivery");
+        }
+        validateDeliveryRelationshipGraph(order, subscription, deliveryAccess);
+        VpnDeliveryType deliveryType = p.action() == PaymentActivationAction.PROVISION
+                ? VpnDeliveryType.ACTIVATION_PROVISION : VpnDeliveryType.ACTIVATION_EXTEND;
+        deliveries.save(VpnDelivery.automatic(order.getUser(), subscription, deliveryAccess, order,
+                deliveryType, configurationFingerprint(deliveryAccess.getConfigurationData()), now));
         order.markActivated(p.token(), p.generation(), now);
         orders.save(order);
         return PaymentActivationOutcome.SUCCEEDED;
@@ -185,5 +201,26 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
         }
         if (p.action() == PaymentActivationAction.PROVISION && (r.configurationData() == null || r.configurationData().isBlank())) throw new PaymentOrderValidationException("Incomplete VPN provision result");
     }
+
+    private String configurationFingerprint(String configuration) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(configuration.getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(64);
+            for (byte value : digest) result.append(String.format("%02x", value));
+            return result.toString();
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+    private void validateDeliveryRelationshipGraph(PaymentOrder order, Subscription subscription, VpnAccess access) {
+        if (!same(order.getUser().getId(), subscription.getUser().getId())
+                || !same(subscription.getId(), access.getSubscription().getId())
+                || order.getSubscription() == null
+                || !same(subscription.getId(), order.getSubscription().getId())) {
+            throw new PaymentOrderValidationException("VPN delivery relationship graph is invalid");
+        }
+    }
+    private boolean same(UUID left, UUID right) { return left != null && left.equals(right); }
     private Instant plus(Instant base, java.time.Duration amount, String message) { try { return base.plus(amount).truncatedTo(ChronoUnit.MICROS); } catch (DateTimeException | ArithmeticException e) { throw new PaymentOrderValidationException(message + " cannot be applied"); } }
 }

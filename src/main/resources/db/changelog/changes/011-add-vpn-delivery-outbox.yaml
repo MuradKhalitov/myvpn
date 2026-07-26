@@ -1,0 +1,48 @@
+databaseChangeLog:
+  - changeSet:
+      id: 011-add-vpn-delivery-outbox
+      author: myvpn
+      changes:
+        - createTable:
+            tableName: vpn_deliveries
+            columns:
+              - column: { name: id, type: uuid, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: user_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: subscription_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: vpn_access_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: source_payment_order_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: delivery_type, type: varchar(32), constraints: { nullable: false } }
+              - column: { name: status, type: varchar(32), constraints: { nullable: false } }
+              - column: { name: attempts, type: int, constraints: { nullable: false } }
+              - column: { name: generation, type: bigint, constraints: { nullable: false } }
+              - column: { name: claim_token, type: uuid }
+              - column: { name: lease_until, type: timestamp(6) with time zone }
+              - column: { name: next_attempt_at, type: timestamp(6) with time zone }
+              - column: { name: safe_failure_code, type: varchar(64) }
+              - column: { name: subscription_version, type: bigint, constraints: { nullable: false } }
+              - column: { name: subscription_expires_at, type: timestamp(6) with time zone, constraints: { nullable: false } }
+              - column: { name: vpn_access_version, type: bigint, constraints: { nullable: false } }
+              - column: { name: vpn_provider_name, type: varchar(32), constraints: { nullable: false } }
+              - column: { name: vpn_external_access_id, type: varchar(128), constraints: { nullable: false } }
+              - column: { name: configuration_fingerprint, type: varchar(64), constraints: { nullable: false } }
+              - column: { name: created_at, type: timestamp(6) with time zone, constraints: { nullable: false } }
+              - column: { name: updated_at, type: timestamp(6) with time zone, constraints: { nullable: false } }
+              - column: { name: delivered_at, type: timestamp(6) with time zone }
+              - column: { name: telegram_message_id, type: bigint }
+              - column: { name: version, type: bigint, defaultValueNumeric: 0, constraints: { nullable: false } }
+        - addForeignKeyConstraint: { baseTableName: vpn_deliveries, baseColumnNames: user_id, referencedTableName: telegram_users, referencedColumnNames: id, constraintName: fk_vpn_deliveries_user }
+        - addForeignKeyConstraint: { baseTableName: vpn_deliveries, baseColumnNames: subscription_id, referencedTableName: subscriptions, referencedColumnNames: id, constraintName: fk_vpn_deliveries_subscription }
+        - addForeignKeyConstraint: { baseTableName: vpn_deliveries, baseColumnNames: vpn_access_id, referencedTableName: vpn_accesses, referencedColumnNames: id, constraintName: fk_vpn_deliveries_access }
+        - addForeignKeyConstraint: { baseTableName: vpn_deliveries, baseColumnNames: source_payment_order_id, referencedTableName: payment_orders, referencedColumnNames: id, constraintName: fk_vpn_deliveries_order, onDelete: CASCADE }
+        - addUniqueConstraint: { tableName: vpn_deliveries, columnNames: source_payment_order_id,delivery_type, constraintName: uk_vpn_deliveries_source_type }
+        - createIndex: { tableName: vpn_deliveries, indexName: idx_vpn_deliveries_claim, columns: [ { column: { name: status } }, { column: { name: next_attempt_at } }, { column: { name: lease_until } } ] }
+        - sql:
+            sql: >
+              ALTER TABLE vpn_deliveries ADD CONSTRAINT chk_vpn_deliveries_state CHECK
+              (((status = 'PROCESSING') = (claim_token IS NOT NULL))
+              AND ((status = 'PROCESSING') = (lease_until IS NOT NULL))
+              AND ((status = 'DELIVERED') = (delivered_at IS NOT NULL))
+              AND ((status = 'RETRY_REQUIRED') = (next_attempt_at IS NOT NULL))
+              AND attempts >= 0 AND generation >= 0)
+      rollback:
+        - dropTable: { tableName: vpn_deliveries, cascadeConstraints: true }

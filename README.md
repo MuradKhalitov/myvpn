@@ -140,3 +140,16 @@ Rollback of changeset 006 is intentionally rejected while
 `varchar(32)` during rollback so `RECONCILIATION_REQUIRED` is never truncated.
 Resolve provisioning states explicitly before operating an older application
 version.
+
+## VPN delivery recovery
+
+Automatic Telegram configuration delivery is an at-least-once durable outbox.
+If Telegram accepts a message and the application stops before the completion
+transaction commits, lease recovery can send the same configuration again.
+
+Deliveries that reach `MANUAL_REVIEW_REQUIRED`, including a configuration that
+does not fit Telegram's 4096-character text limit, require support handling.
+Locate the row by its safe status/failure code only. Do not copy a VPN URI into
+a ticket, application log, or chat. There is deliberately no administrator
+resend command. The owner can use `/vpn` in a private chat only when the full
+configuration fits in one Telegram text message.

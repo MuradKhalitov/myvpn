@@ -55,17 +55,19 @@ class PaymentActivationMigrationIntegrationTest {
         try (Connection connection = dataSource.getConnection()) {
             Liquibase liquibase = new Liquibase("db/changelog/db.changelog-master.yaml",
                     new ClassLoaderResourceAccessor(), new JdbcConnection(connection));
-            liquibase.rollback(2, new Contexts(), new LabelExpression());
+            liquibase.rollback(3, new Contexts(), new LabelExpression());
             assertThat(columnExists("next_activation_at")).isFalse();
             assertThat(indexExists("idx_payment_orders_activation_queue")).isFalse();
             assertThat(columnExists("activation_completed_at")).isFalse();
             assertThat(columnExists("version", "vpn_accesses")).isFalse();
+            assertThat(columnExists("id", "vpn_deliveries")).isFalse();
             liquibase.update(new Contexts(), new LabelExpression());
         }
         assertThat(columnExists("next_activation_at")).isTrue();
         assertThat(indexExists("idx_payment_orders_activation_queue")).isTrue();
         assertThat(columnExists("activation_completed_at")).isTrue();
         assertThat(columnExists("version", "vpn_accesses")).isTrue();
+        assertThat(columnExists("id", "vpn_deliveries")).isTrue();
     }
 
     private boolean columnExists(String column) {
