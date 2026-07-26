@@ -2,64 +2,76 @@
 
 ## Requirements
 
-Use one supported Linux VPS with Docker Engine and the Docker Compose plugin, outbound HTTPS access to Telegram and the configured 3x-ui server, and enough persistent disk for PostgreSQL backups. Do not install Docker with an unreviewed `curl | sh` script; use the official Docker documentation for the VPS distribution and verify package signatures according to that distribution's guidance.
+Use a supported Linux VPS with Docker Engine and the Docker Compose plugin, outbound HTTPS access to Telegram and 3x-ui, and persistent disk for PostgreSQL backups. The bot uses long polling; neither Spring Boot port 8080 nor PostgreSQL port 5432 is published to the host. Restrict SSH to trusted administration networks and do not open 8080 or 5432 in the firewall.
 
-The application and PostgreSQL are intentionally not published to the host. The bot uses Telegram long polling, so there is no inbound HTTP requirement. Allow outbound TCP/443 to Telegram and 3x-ui, allow SSH only from trusted administration networks, and do not open ports 5432 or 8080 in the firewall.
+## Публикация образа
 
-## First launch
+Build and publish on a local computer or CI, not on the VPS. `scripts/publish-image.ps1` runs from any Windows PowerShell directory, locates the Git root, builds for `linux/amd64`, and derives the immutable image tag from the short Git commit. It never changes `.env.staging`.
 
-Clone the reviewed revision, then create the real environment file. It is secret material and must never be committed or copied to chat/logs.
+### Проверочная сборка без push
 
-```bash
-git clone <repository-url> myvpn
-cd myvpn
-cp .env.server.example .env.server
-chmod 600 .env.server
-editor .env.server
-docker compose --env-file .env.server -f compose.server.yaml config
-docker compose --env-file .env.server -f compose.server.yaml up -d --build
+```powershell
+.\scripts\publish-image.ps1 `
+  -DockerHubRepository "dockerhub-user/myvpn" `
+  -NoPush
 ```
 
-Check process state and application logs (the latter are stdout/stderr only):
+This uses `--load`, so the image is available in the local Docker image store and no registry push occurs.
 
-```bash
-docker compose -f compose.server.yaml ps
-docker compose -f compose.server.yaml logs -f app
-docker compose -f compose.server.yaml exec app curl --fail http://127.0.0.1:8080/actuator/health
+### Публикация immutable image
+
+```powershell
+docker login
+
+.\scripts\publish-image.ps1 `
+  -DockerHubRepository "dockerhub-user/myvpn"
 ```
 
-The health endpoint is only reachable inside the Docker network/container and exposes no actuator endpoints other than health.
+### Публикация immutable image и staging alias
 
-Before launch, verify outbound Telegram access without a token:
-
-```bash
-curl -I https://api.telegram.org
+```powershell
+.\scripts\publish-image.ps1 `
+  -DockerHubRepository "dockerhub-user/myvpn" `
+  -PublishStagingAlias
 ```
 
-For 3x-ui, make an HTTPS/TLS reachability check to the configured host (for example `curl -I https://<3x-ui-host>/`) without embedding, echoing, or logging credentials. The application uses its configured HTTPS base URL and timeouts.
+Use a Docker Hub access token for `docker login`, preferably with minimum permissions. The commit tag is the primary deployment and rollback tag; mutable `staging` is only an additional alias. Never pass registry credentials or application secrets through build args. `.env.staging`, `.env.server`, and `.env-bot` are excluded from the build context and must not be copied into an image. After publication, manually copy the script's displayed `MYVPN_IMAGE` value into `.env.staging`.
 
-Never run a local instance and the server instance with the same Telegram bot token: both compete for `getUpdates`. Compose declares exactly one `app` replica, and the application holds a PostgreSQL advisory lock derived from the token; a second instance against the same database fails before it can own long polling.
+## VPS setup and first staging smoke-test
 
-## Первый staging smoke-test
-
-Staging starts real Telegram long polling and real 3x-ui provisioning, but uses fake payments. Stop every local application instance using the same Telegram bot token before starting staging. This avoids competing `getUpdates` consumers even when the local instance uses another database.
+Create a dedicated non-root deployment user, for example `myvpn-deploy`, with permission to use Docker. Run `docker login` as that user, not as root. A private Docker Hub repository requires `docker login` on the VPS, preferably using a read-only access token when available.
 
 ```bash
+sudo mkdir -p /opt/myvpn
+sudo chown myvpn-deploy:myvpn-deploy /opt/myvpn
+cd /opt/myvpn
 cp .env.staging.example .env.staging
+chmod 600 .env.staging
 editor .env.staging
-
-docker compose \
-  --env-file .env.staging \
-  -f compose.server.yaml \
-  config
-
-docker compose \
-  --env-file .env.staging \
-  -f compose.server.yaml \
-  up -d --build
 ```
 
-Observe only container state and redacted application logs:
+Set `MYVPN_IMAGE` to an immutable published commit tag. Stop every local application instance using the same Telegram bot token before starting staging, otherwise both instances compete for `getUpdates`.
+
+```bash
+docker login
+
+docker compose \
+  --env-file .env.staging \
+  -f compose.server.yaml \
+  config --quiet
+
+docker compose \
+  --env-file .env.staging \
+  -f compose.server.yaml \
+  pull app
+
+docker compose \
+  --env-file .env.staging \
+  -f compose.server.yaml \
+  up -d --no-build
+```
+
+`docker compose pull` can also refresh the pinned PostgreSQL image. Check state and redacted logs:
 
 ```bash
 docker compose -f compose.server.yaml ps
@@ -67,28 +79,50 @@ docker compose -f compose.server.yaml logs -f app
 curl -I https://api.telegram.org
 ```
 
-Check 3x-ui reachability over HTTPS/TLS without printing a username, password, or session cookie (for example, an unauthenticated `curl -I https://<3x-ui-host>/`). Do not use staging credentials in shell history or logs. Neither PostgreSQL nor the Spring Boot port is published by this Compose configuration.
+Check 3x-ui reachability over HTTPS/TLS without printing a username, password, or session cookie. Staging uses fake payments but real Telegram long polling and 3x-ui. Production rejects both fake providers.
 
-The staging profile permits `PAYMENT_PROVIDER=FAKE` only with `PAYMENT_ALLOW_FAKE=true`; it always rejects `VPN_PROVIDER_TYPE=FAKE`. Production continues to reject both fake providers.
+## Production deployment
 
-## Stop, update, and rollback
+Create `.env.server` from `.env.server.example`, set `MYVPN_IMAGE` to an immutable commit tag, then use the same `config --quiet`, `pull app`, and `up -d --no-build` sequence. Production requires real payment and VPN providers. Keep `.env.server` private and never commit it.
 
-Stop without deleting PostgreSQL data:
+## Update and rollback
+
+Update staging by changing only the immutable image reference, then pull and recreate the application:
 
 ```bash
-docker compose -f compose.server.yaml down
+nano .env.staging
+# MYVPN_IMAGE=dockerhub-user/myvpn:NEW_COMMIT
+
+docker compose \
+  --env-file .env.staging \
+  -f compose.server.yaml \
+  pull app
+
+docker compose \
+  --env-file .env.staging \
+  -f compose.server.yaml \
+  up -d --no-build
+
+docker compose \
+  --env-file .env.staging \
+  -f compose.server.yaml \
+  ps
 ```
 
-For an update, back up first, fetch a reviewed Git revision, inspect the diff and Compose config, then run the same `up -d --build` command. To roll back, check out the prior known-good Git commit (or use the previously built/tagged image after changing the Compose image reference), verify `docker compose ... config`, and start it with `up -d`. Keep database migrations backward-compatible; a code rollback after an irreversible migration needs a separately tested database rollback plan.
+To roll back, restore the previous immutable `MYVPN_IMAGE` commit tag in `.env.staging`, run `pull app`, run `up -d --no-build`, then check health and logs. Rolling back an application image does **not** roll back Liquibase migrations. If a release introduced an incompatible database migration, changing the image tag alone can be insufficient; use a separately tested database rollback plan.
 
 ## PostgreSQL backup and restore
 
-Create a compressed logical backup on the VPS and store it outside the repository with restricted permissions:
+Stop the application before a restore. Store compressed logical backups outside the repository with restricted permissions:
 
 ```bash
 docker compose -f compose.server.yaml exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > myvpn-postgres-$(date +%F).sql.gz
 ```
 
-For restore, stop the application first, create a fresh target database or explicitly approve overwriting the existing one, then restore using `psql` from the PostgreSQL container. Test restores on a non-production database before relying on them. Do not put passwords in command history; use the environment file or an interactive protected prompt.
+Restore into a fresh target database or explicitly approve overwriting the existing database, using `psql` inside the PostgreSQL container. Test restores outside production before relying on them. Do not place passwords in command history.
 
-The production profile rejects `PAYMENT_PROVIDER=FAKE` and `VPN_PROVIDER_TYPE=FAKE`, even if an allow flag is set. A real payment-provider implementation/configuration is required before production activation can succeed.
+## Stop
+
+```bash
+docker compose -f compose.server.yaml down
+```

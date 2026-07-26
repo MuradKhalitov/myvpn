@@ -25,6 +25,7 @@ target/
 ### Local environment and secrets ###
 .env
 .env-*
+.env-bot
 .env.server
 !.env.server.example
 .env.staging
