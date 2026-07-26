@@ -1,6 +1,7 @@
 package ru.murad.myvpn.client;
 
 import ru.murad.myvpn.exception.ThreeXUiUncertainException;
+import ru.murad.myvpn.exception.VpnProviderFailureCode;
 
 public final class ThreeXUiRequestBudget {
 
@@ -16,7 +17,7 @@ public final class ThreeXUiRequestBudget {
 
     public synchronized void reserveReconciliation() {
         if (remaining < 2) {
-            throw new ThreeXUiUncertainException();
+            throw new ThreeXUiUncertainException(VpnProviderFailureCode.REQUEST_BUDGET_EXHAUSTED);
         }
         reconciliationReserved = true;
     }
@@ -24,14 +25,14 @@ public final class ThreeXUiRequestBudget {
     public synchronized void acquire() {
         int reserved = reconciliationReserved ? 1 : 0;
         if (remaining <= reserved) {
-            throw new ThreeXUiUncertainException();
+            throw new ThreeXUiUncertainException(VpnProviderFailureCode.REQUEST_BUDGET_EXHAUSTED);
         }
         remaining--;
     }
 
     public synchronized void acquireReconciliation() {
         if (remaining == 0) {
-            throw new ThreeXUiUncertainException();
+            throw new ThreeXUiUncertainException(VpnProviderFailureCode.REQUEST_BUDGET_EXHAUSTED);
         }
         remaining--;
         reconciliationReserved = false;

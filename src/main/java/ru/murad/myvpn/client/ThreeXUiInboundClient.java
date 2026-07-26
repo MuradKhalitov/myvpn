@@ -25,6 +25,7 @@ import ru.murad.myvpn.exception.ThreeXUiAuthenticationException;
 import ru.murad.myvpn.exception.ThreeXUiException;
 import ru.murad.myvpn.exception.ThreeXUiNotFoundException;
 import ru.murad.myvpn.exception.ThreeXUiRetryableException;
+import ru.murad.myvpn.exception.VpnProviderFailureCode;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -64,10 +65,12 @@ public class ThreeXUiInboundClient {
             ThreeXUiApiResponse<ThreeXUiInboundResponse> apiResponse =
                     readResponse(response.body(), ThreeXUiInboundResponse.class);
             if (!apiResponse.success() || apiResponse.obj() == null) {
-                throw new ThreeXUiException("3x-ui failed to return the configured inbound");
+                throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                        "3x-ui failed to return the configured inbound");
             }
             if (!"vless".equalsIgnoreCase(apiResponse.obj().protocol())) {
-                throw new ThreeXUiException("Configured 3x-ui inbound is not VLESS");
+                throw new ThreeXUiException(VpnProviderFailureCode.UNSUPPORTED_INBOUND_CONFIGURATION,
+                        "Configured 3x-ui inbound is not VLESS");
             }
         return apiResponse.obj();
     }
@@ -76,7 +79,8 @@ public class ThreeXUiInboundClient {
         try {
             return objectMapper.readValue(inbound.settings(), ThreeXUiInboundSettings.class);
         } catch (JsonProcessingException exception) {
-            throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "Invalid 3x-ui inbound settings format");
         }
     }
 
@@ -104,7 +108,8 @@ public class ThreeXUiInboundClient {
             JsonNode settings = objectMapper.readTree(inbound.settings());
             JsonNode clients = settings == null ? null : settings.get("clients");
             if (!(clients instanceof ArrayNode clientsArray)) {
-                throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+                throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                        "Invalid 3x-ui inbound settings format");
             }
             ObjectNode target = null;
             for (JsonNode candidate : clientsArray) {
@@ -124,7 +129,8 @@ public class ThreeXUiInboundClient {
                     properties.inboundId(),
                     objectMapper.writeValueAsString(updateSettings));
         } catch (JsonProcessingException exception) {
-            throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "Invalid 3x-ui inbound settings format");
         }
     }
 
@@ -142,7 +148,8 @@ public class ThreeXUiInboundClient {
             return clientsByIdExcluding(beforeClients, targetClientUuid)
                     .equals(clientsByIdExcluding(afterClients, targetClientUuid));
         } catch (JsonProcessingException exception) {
-            throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "Invalid 3x-ui inbound settings format");
         }
     }
 
@@ -155,7 +162,8 @@ public class ThreeXUiInboundClient {
         try {
             return objectMapper.writeValueAsString(settings);
         } catch (JsonProcessingException exception) {
-            throw new ThreeXUiException("Unable to serialize 3x-ui client settings");
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "Unable to serialize 3x-ui client settings");
         }
     }
 
@@ -167,10 +175,12 @@ public class ThreeXUiInboundClient {
         ThreeXUiApiResponse<ThreeXUiInboundResponse> apiResponse =
                 readResponse(response.body(), ThreeXUiInboundResponse.class);
         if (!apiResponse.success() || apiResponse.obj() == null) {
-            throw new ThreeXUiException("3x-ui failed to return the configured inbound");
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "3x-ui failed to return the configured inbound");
         }
         if (!"vless".equalsIgnoreCase(apiResponse.obj().protocol())) {
-            throw new ThreeXUiException("Configured 3x-ui inbound is not VLESS");
+            throw new ThreeXUiException(VpnProviderFailureCode.UNSUPPORTED_INBOUND_CONFIGURATION,
+                    "Configured 3x-ui inbound is not VLESS");
         }
         return apiResponse.obj();
     }
@@ -187,7 +197,8 @@ public class ThreeXUiInboundClient {
             LOGGER.warn("3x-ui operation={} httpStatus={} apiSuccess=false "
                             + "errorCategory=business_rejection",
                     operation, response.status().value());
-            throw new ThreeXUiException("3x-ui rejected operation: " + operation);
+            throw new ThreeXUiException(VpnProviderFailureCode.CLIENT_CONFLICT,
+                    "3x-ui rejected operation: " + operation);
         }
         LOGGER.debug("3x-ui operation={} httpStatus={} apiSuccess=true",
                 operation, response.status().value());
@@ -258,7 +269,9 @@ public class ThreeXUiInboundClient {
                 throw new ThreeXUiException("3x-ui TLS validation failed");
             }
             throw new ThreeXUiRetryableException(
-                    "Temporary network failure during 3x-ui request");
+                    isTimeout(exception) ? VpnProviderFailureCode.REQUEST_TIMEOUT
+                            : VpnProviderFailureCode.PROVIDER_UNAVAILABLE,
+                    null, "Temporary network failure during 3x-ui request");
         }
     }
 
@@ -281,11 +294,14 @@ public class ThreeXUiInboundClient {
             throw new ThreeXUiNotFoundException(operation);
         }
         if (code == 429 || code == 502 || code == 503 || code == 504) {
-            throw new ThreeXUiRetryableException(
-                    "Temporary 3x-ui HTTP failure: " + code);
+            throw new ThreeXUiRetryableException(code == 429
+                    ? VpnProviderFailureCode.RATE_LIMITED
+                    : VpnProviderFailureCode.PROVIDER_UNAVAILABLE,
+                    null, "Temporary 3x-ui HTTP failure");
         }
         if (!status.is2xxSuccessful()) {
-            throw new ThreeXUiException("3x-ui HTTP failure: " + code);
+            throw new ThreeXUiException(VpnProviderFailureCode.UNKNOWN_PROVIDER_ERROR,
+                    "3x-ui HTTP failure");
         }
     }
 
@@ -295,7 +311,8 @@ public class ThreeXUiInboundClient {
                     .constructParametricType(ThreeXUiApiResponse.class, objectType);
             return objectMapper.readValue(body, type);
         } catch (JsonProcessingException exception) {
-            throw new ThreeXUiException("Invalid 3x-ui API response format");
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "Invalid 3x-ui API response format");
         }
     }
 
@@ -307,7 +324,8 @@ public class ThreeXUiInboundClient {
         if (clients instanceof ArrayNode array) {
             return array;
         }
-        throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+        throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                "Invalid 3x-ui inbound settings format");
     }
 
     private Map<String, JsonNode> clientsByIdExcluding(
@@ -318,7 +336,8 @@ public class ThreeXUiInboundClient {
         for (JsonNode client : clients) {
             String id = client.path("id").asText(null);
             if (id == null) {
-                throw new ThreeXUiException("Invalid 3x-ui inbound settings format");
+                throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                        "Invalid 3x-ui inbound settings format");
             }
             if (!excludedClientUuid.equals(id)) {
                 result.put(id, client);
@@ -340,6 +359,16 @@ public class ThreeXUiInboundClient {
             Thread.currentThread().interrupt();
             throw new ThreeXUiException("3x-ui retry was interrupted", exception);
         }
+    }
+
+    private boolean isTimeout(WebClientRequestException exception) {
+        for (Throwable cursor = exception; cursor != null; cursor = cursor.getCause()) {
+            if (cursor instanceof java.util.concurrent.TimeoutException
+                    || cursor instanceof io.netty.handler.timeout.TimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static record RawResponse(

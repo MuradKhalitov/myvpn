@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import ru.murad.myvpn.client.threexui.ThreeXUiApiResponse;
 import ru.murad.myvpn.config.ThreeXUiProperties;
 import ru.murad.myvpn.exception.ThreeXUiAuthenticationException;
+import ru.murad.myvpn.exception.VpnProviderFailureCode;
 
 import java.util.List;
 
@@ -49,11 +50,14 @@ public class ThreeXUiAuthClient {
                         int status = response.statusCode().value();
                         if (status == 429 || status == 502
                                 || status == 503 || status == 504) {
+                            VpnProviderFailureCode code = status == 429
+                                    ? VpnProviderFailureCode.RATE_LIMITED
+                                    : VpnProviderFailureCode.PROVIDER_UNAVAILABLE;
                             return response.releaseBody().then(Mono.error(
                                     new ru.murad.myvpn.exception
                                             .ThreeXUiRetryableException(
-                                            "Temporary 3x-ui authentication failure: "
-                                                    + status)));
+                                            code, null,
+                                            "Temporary 3x-ui authentication failure")));
                         }
                         if (!response.statusCode().is2xxSuccessful()) {
                             return response.releaseBody()
@@ -71,7 +75,9 @@ public class ThreeXUiAuthClient {
                         "3x-ui TLS validation failed");
             }
             throw new ru.murad.myvpn.exception.ThreeXUiRetryableException(
-                    "Temporary network failure during 3x-ui authentication");
+                    isTimeout(exception) ? VpnProviderFailureCode.REQUEST_TIMEOUT
+                            : VpnProviderFailureCode.PROVIDER_UNAVAILABLE,
+                    null, "Temporary network failure during 3x-ui authentication");
         }
     }
 
@@ -87,5 +93,15 @@ public class ThreeXUiAuthClient {
         } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
             throw new ThreeXUiAuthenticationException();
         }
+    }
+
+    private boolean isTimeout(WebClientRequestException exception) {
+        for (Throwable cursor = exception; cursor != null; cursor = cursor.getCause()) {
+            if (cursor instanceof java.util.concurrent.TimeoutException
+                    || cursor instanceof io.netty.handler.timeout.TimeoutException) {
+                return true;
+            }
+        }
+        return false;
     }
 }

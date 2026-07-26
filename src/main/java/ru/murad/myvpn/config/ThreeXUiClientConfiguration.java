@@ -27,7 +27,12 @@ public class ThreeXUiClientConfiguration {
     }
 
     private void validate(ThreeXUiProperties properties) {
-        if (properties.username() == null || properties.username().isBlank()
+        if (properties.baseUrl() == null || properties.baseUrl().getScheme() == null
+                || properties.baseUrl().getScheme().isBlank()
+                || properties.baseUrl().getHost() == null
+                || properties.baseUrl().getHost().isBlank()
+                || properties.webBasePath() == null || properties.webBasePath().isBlank()
+                || properties.username() == null || properties.username().isBlank()
                 || properties.password() == null || properties.password().isBlank()
                 || properties.inboundId() <= 0
                 || properties.publicHost() == null
@@ -36,16 +41,17 @@ public class ThreeXUiClientConfiguration {
                 && (properties.publicPortOverride() < 1
                 || properties.publicPortOverride() > 65535)
                 || properties.connectTimeout() == null
-                || properties.connectTimeout().isNegative()
+                || properties.connectTimeout().isNegative() || properties.connectTimeout().isZero()
                 || properties.readTimeout() == null
-                || properties.readTimeout().isNegative()
+                || properties.readTimeout().isNegative() || properties.readTimeout().isZero()
                 || properties.maxMutationAttempts() < 1
                 || properties.maxMutationAttempts() > 3
                 || properties.maxRequestsPerOperation() < 4
                 || properties.retryInitialDelay() == null
                 || properties.retryInitialDelay().isNegative()
                 || properties.retryMaxDelay() == null
-                || properties.retryMaxDelay().isNegative()) {
+                || properties.retryMaxDelay().isNegative()
+                || properties.retryMaxDelay().compareTo(properties.retryInitialDelay()) < 0) {
             throw new ThreeXUiException("Invalid 3x-ui configuration");
         }
         try {

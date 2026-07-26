@@ -6,7 +6,12 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
+import reactor.netty.http.client.HttpClient;
 import ru.murad.myvpn.client.threexui.ThreeXUiClientRequest;
 import ru.murad.myvpn.client.threexui.ThreeXUiInboundSettings;
 import ru.murad.myvpn.client.threexui.ThreeXUiVlessClient;
@@ -17,6 +22,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
@@ -439,6 +445,51 @@ class ThreeXUiInboundClientWireMockTest {
     }
 
     @Test
+    void extendAndRevokeKeepStableIdentityAcrossHttpFlow() {
+        String clientId = "10000000-0000-0000-0000-000000000021";
+        String serviceId = "10000000-0000-0000-0000-000000000022";
+        long targetExpiry = 45678L;
+        String beforeClients = "[{\"id\":\"" + clientId + "\",\"email\":\"target\",\"enable\":true,\"expiryTime\":12345},"
+                + "{\"id\":\"" + serviceId + "\",\"email\":\"service\",\"enable\":true,\"expiryTime\":0}]";
+        String extendedClients = "[{\"id\":\"" + clientId + "\",\"email\":\"target\",\"enable\":true,\"expiryTime\":" + targetExpiry + "},"
+                + "{\"id\":\"" + serviceId + "\",\"email\":\"service\",\"enable\":true,\"expiryTime\":0}]";
+        String revokedClients = "[{\"id\":\"" + serviceId + "\",\"email\":\"service\",\"enable\":true,\"expiryTime\":0}]";
+        stubLogin(COOKIE);
+        server.stubFor(get(urlEqualTo(inboundPath())).inScenario("extend-revoke")
+                .whenScenarioStateIs("Started").willReturn(json(inboundResponse("vless", beforeClients)))
+                .willSetStateTo("extend-ready"));
+        server.stubFor(post(urlEqualTo(WEB_PATH + "/panel/api/inbounds/updateClient/" + clientId))
+                .inScenario("extend-revoke").whenScenarioStateIs("extend-ready")
+                .willReturn(json("{\"success\":true,\"msg\":\"\",\"obj\":null}"))
+                .willSetStateTo("extend-confirm"));
+        server.stubFor(get(urlEqualTo(inboundPath())).inScenario("extend-revoke")
+                .whenScenarioStateIs("extend-confirm").willReturn(json(inboundResponse("vless", extendedClients)))
+                .willSetStateTo("extend-confirm-second"));
+        server.stubFor(get(urlEqualTo(inboundPath())).inScenario("extend-revoke")
+                .whenScenarioStateIs("extend-confirm-second").willReturn(json(inboundResponse("vless", extendedClients)))
+                .willSetStateTo("revoke-ready"));
+        server.stubFor(get(urlEqualTo(inboundPath())).inScenario("extend-revoke")
+                .whenScenarioStateIs("revoke-ready").willReturn(json(inboundResponse("vless", extendedClients)))
+                .willSetStateTo("delete-ready"));
+        server.stubFor(post(urlEqualTo(WEB_PATH + "/panel/api/inbounds/42/delClient/" + clientId))
+                .inScenario("extend-revoke").whenScenarioStateIs("delete-ready")
+                .willReturn(json("{\"success\":true,\"msg\":\"\",\"obj\":null}"))
+                .willSetStateTo("delete-confirm"));
+        server.stubFor(get(urlEqualTo(inboundPath())).inScenario("extend-revoke")
+                .whenScenarioStateIs("delete-confirm").willReturn(json(inboundResponse("vless", revokedClients))));
+
+        ProvisionedVpnAccess extended = provider(8).extend(new VpnExtensionRequest(
+                clientId, java.time.Instant.ofEpochMilli(targetExpiry)));
+        provider(8).revoke(clientId);
+
+        assertThat(extended.externalAccessId()).isEqualTo(clientId);
+        assertThat(extended.targetExpiresAt()).isEqualTo(java.time.Instant.ofEpochMilli(targetExpiry));
+        server.verify(1, postRequestedFor(urlEqualTo(WEB_PATH + "/login")));
+        server.verify(1, postRequestedFor(urlEqualTo(WEB_PATH + "/panel/api/inbounds/updateClient/" + clientId)));
+        server.verify(1, postRequestedFor(urlEqualTo(WEB_PATH + "/panel/api/inbounds/42/delClient/" + clientId)));
+    }
+
+    @Test
     void existingClientMustProduceConfigurationWithoutAddMutation() {
         String clientId = "10000000-0000-0000-0000-000000000011";
         stubLogin(COOKIE);
@@ -593,6 +644,70 @@ class ThreeXUiInboundClientWireMockTest {
 
         server.verify(1, postRequestedFor(urlEqualTo(WEB_PATH + "/login")));
         server.verify(0, getRequestedFor(urlEqualTo(inboundPath())));
+    }
+
+    @ParameterizedTest
+    @MethodSource("retryableHttpStatuses")
+    void retryableHttpFailuresHaveSafeCodes(int status, ru.murad.myvpn.exception.VpnProviderFailureCode expectedCode) {
+        stubLogin(COOKIE);
+        server.stubFor(get(urlEqualTo(inboundPath())).willReturn(aResponse().withStatus(status)));
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(() -> client.getInbound(budget));
+
+        assertThat(thrown).isInstanceOf(ru.murad.myvpn.exception.ThreeXUiRetryableException.class);
+        ru.murad.myvpn.exception.ThreeXUiException failure =
+                (ru.murad.myvpn.exception.ThreeXUiException) thrown;
+        assertThat(failure.safeFailureCode()).isEqualTo(expectedCode);
+        assertThat(failure.retryable()).isTrue();
+        assertThat(failure.toString()).doesNotContain(COOKIE, "test-password");
+    }
+
+    @Test
+    void invalidJsonAndRequestBudgetHaveSafeFailureCodes() {
+        stubLogin(COOKIE);
+        server.stubFor(get(urlEqualTo(inboundPath())).willReturn(json("not-json")));
+
+        Throwable invalidJson = org.assertj.core.api.Assertions.catchThrowable(() -> client.getInbound(budget));
+        assertThat(invalidJson).isInstanceOf(ru.murad.myvpn.exception.ThreeXUiException.class);
+        assertThat(((ru.murad.myvpn.exception.ThreeXUiException) invalidJson).safeFailureCode())
+                .isEqualTo(ru.murad.myvpn.exception.VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE);
+
+        Throwable exhausted = org.assertj.core.api.Assertions.catchThrowable(
+                () -> new ThreeXUiRequestBudget(1).reserveReconciliation());
+        assertThat(exhausted).isInstanceOf(ru.murad.myvpn.exception.ThreeXUiUncertainException.class);
+        assertThat(((ru.murad.myvpn.exception.ThreeXUiException) exhausted).safeFailureCode())
+                .isEqualTo(ru.murad.myvpn.exception.VpnProviderFailureCode.REQUEST_BUDGET_EXHAUSTED);
+    }
+
+    @Test
+    void responseTimeoutHasSafeRetryableCode() {
+        stubLogin(COOKIE);
+        server.stubFor(get(urlEqualTo(inboundPath()))
+                .willReturn(json(inboundResponse("vless", "[]")).withFixedDelay(500)));
+        WebClient timedClient = WebClient.builder().clientConnector(
+                new ReactorClientHttpConnector(HttpClient.create().responseTimeout(Duration.ofMillis(50)))).build();
+        ThreeXUiProperties properties = properties();
+        ThreeXUiUrlFactory urlFactory = new ThreeXUiUrlFactory(properties, true);
+        ThreeXUiSessionManager timedSession = new ThreeXUiSessionManager(
+                new ThreeXUiAuthClient(timedClient, urlFactory, properties, new ObjectMapper()));
+        ThreeXUiInboundClient timeoutClient = new ThreeXUiInboundClient(
+                timedClient, new ObjectMapper(), urlFactory, timedSession, properties);
+
+        Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(
+                () -> timeoutClient.getInbound(new ThreeXUiRequestBudget(4)));
+
+        assertThat(thrown).isInstanceOf(ru.murad.myvpn.exception.ThreeXUiRetryableException.class);
+        assertThat(((ru.murad.myvpn.exception.ThreeXUiException) thrown).safeFailureCode())
+                .isEqualTo(ru.murad.myvpn.exception.VpnProviderFailureCode.REQUEST_TIMEOUT);
+        assertThat(((ru.murad.myvpn.exception.ThreeXUiException) thrown).retryable()).isTrue();
+    }
+
+    private static Stream<Arguments> retryableHttpStatuses() {
+        return Stream.of(
+                Arguments.of(429, ru.murad.myvpn.exception.VpnProviderFailureCode.RATE_LIMITED),
+                Arguments.of(502, ru.murad.myvpn.exception.VpnProviderFailureCode.PROVIDER_UNAVAILABLE),
+                Arguments.of(503, ru.murad.myvpn.exception.VpnProviderFailureCode.PROVIDER_UNAVAILABLE),
+                Arguments.of(504, ru.murad.myvpn.exception.VpnProviderFailureCode.PROVIDER_UNAVAILABLE));
     }
 
     private ThreeXUiProperties properties() {

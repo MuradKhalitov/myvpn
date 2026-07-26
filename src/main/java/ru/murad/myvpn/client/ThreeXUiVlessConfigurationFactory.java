@@ -3,6 +3,7 @@ package ru.murad.myvpn.client;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import ru.murad.myvpn.exception.ThreeXUiException;
+import ru.murad.myvpn.exception.VpnProviderFailureCode;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -22,7 +23,7 @@ public class ThreeXUiVlessConfigurationFactory implements VpnConfigurationFactor
     public String create(VlessConfigurationData data) {
         if (!"tcp".equalsIgnoreCase(data.network())
                 || !"reality".equalsIgnoreCase(data.security())) {
-            throw new ThreeXUiException(UNSUPPORTED);
+            throw new ThreeXUiException(VpnProviderFailureCode.UNSUPPORTED_INBOUND_CONFIGURATION, UNSUPPORTED);
         }
         validate(data);
         List<String> parameters = new ArrayList<>();
