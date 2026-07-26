@@ -867,9 +867,9 @@ class PaymentOrderTest {
                 String.format("%s", order));
 
         assertThat(representations).allSatisfy(text -> assertThat(text)
-                        .contains(order.getId().toString(),
-                                "FAKE", "PENDING", "90.00", "RUB")
+                        .contains("FAKE", "PENDING")
                         .doesNotContain(
+                                order.getId().toString(),
                                 "provider-id",
                                 order.getIdempotenceKey().toString(),
                                 "https://example.test/payment",

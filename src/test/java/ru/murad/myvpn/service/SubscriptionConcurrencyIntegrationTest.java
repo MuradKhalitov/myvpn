@@ -17,7 +17,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.client.VpnProvider;
 import ru.murad.myvpn.client.VpnProvisionRequest;
@@ -63,7 +63,7 @@ class SubscriptionConcurrencyIntegrationTest {
 
     @Container
     static final PostgreSQLContainer POSTGRESQL =
-            new PostgreSQLContainer("postgres:16.3-alpine");
+            new PostgreSQLContainer<>("postgres:16.3-alpine");
 
     @DynamicPropertySource
     static void configurePostgresql(DynamicPropertyRegistry registry) {
@@ -525,7 +525,7 @@ class SubscriptionConcurrencyIntegrationTest {
                         SubscriptionStatus.MANUAL_REVIEW_REQUIRED, 7202L);
                 connection.commit();
 
-                liquibase.rollback(1, new Contexts(), new LabelExpression());
+                liquibase.rollback(3, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.columns
@@ -536,20 +536,20 @@ class SubscriptionConcurrencyIntegrationTest {
                         SELECT count(*)::text FROM information_schema.tables
                         WHERE table_schema='%s' AND table_name='payment_orders'
                         """.formatted(schema))).isEqualTo("1");
-                liquibase.update(1, new Contexts(), new LabelExpression());
+                liquibase.update(3, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.columns
                         WHERE table_schema='%s' AND table_name='payment_orders'
                           AND column_name='provider_expires_at'
                         """.formatted(schema))).isEqualTo("1");
-                liquibase.rollback(2, new Contexts(), new LabelExpression());
+                liquibase.rollback(4, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.tables
                         WHERE table_schema='%s' AND table_name='payment_orders'
                         """.formatted(schema))).isEqualTo("0");
-                liquibase.update(2, new Contexts(), new LabelExpression());
+                liquibase.update(4, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.tables
@@ -560,7 +560,7 @@ class SubscriptionConcurrencyIntegrationTest {
                         WHERE table_schema='%s' AND table_name='payment_orders'
                           AND column_name='provider_expires_at'
                         """.formatted(schema))).isEqualTo("1");
-                liquibase.rollback(2, new Contexts(), new LabelExpression());
+                liquibase.rollback(4, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
 
                 assertThatThrownBy(() -> liquibase.rollback(

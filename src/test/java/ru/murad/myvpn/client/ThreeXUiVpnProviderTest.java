@@ -173,6 +173,69 @@ class ThreeXUiVpnProviderTest {
     }
 
     @Test
+    void extendReturnsConfirmedIdentityAndAbsoluteExpiry() {
+        ThreeXUiInboundResponse before = inbound("before");
+        ThreeXUiInboundResponse after = inbound("after");
+        ThreeXUiVlessClient existing = client(1000L);
+        ThreeXUiVlessClient updated = existing.withExpiryTime(EXPIRY.toEpochMilli());
+        when(inboundClient.getInbound(any())).thenReturn(before);
+        when(inboundClient.getInboundForReconciliation(any())).thenReturn(after);
+        when(inboundClient.parseSettings(before)).thenReturn(new ThreeXUiInboundSettings(List.of(existing)));
+        when(inboundClient.parseSettings(after)).thenReturn(new ThreeXUiInboundSettings(List.of(updated)));
+        when(inboundClient.prepareExpiryUpdateRequest(before, SUBSCRIPTION_ID.toString(), EXPIRY.toEpochMilli()))
+                .thenReturn(new ThreeXUiClientRequest(42, "expiry-only"));
+        when(inboundClient.otherClientsUnchanged(before, after, SUBSCRIPTION_ID.toString())).thenReturn(true);
+
+        ProvisionedVpnAccess result = provider.extend(new VpnExtensionRequest(SUBSCRIPTION_ID.toString(), EXPIRY));
+        assertThat(result.externalAccessId()).isEqualTo(SUBSCRIPTION_ID.toString());
+        assertThat(result.targetExpiresAt()).isEqualTo(EXPIRY);
+    }
+
+    @Test
+    void extendWithAlreadyAppliedTargetIsIdempotent() {
+        ThreeXUiInboundResponse inbound = inbound("same-target");
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound))
+                .thenReturn(new ThreeXUiInboundSettings(List.of(client(EXPIRY.toEpochMilli()))));
+
+        ProvisionedVpnAccess result = provider.extend(new VpnExtensionRequest(SUBSCRIPTION_ID.toString(), EXPIRY));
+        assertThat(result.targetExpiresAt()).isEqualTo(EXPIRY);
+        verify(inboundClient, never()).updateClient(any(), any(), any());
+    }
+
+    @Test
+    void provisionUsesStableExternalAccessIdWhenProvided() {
+        ThreeXUiInboundResponse inbound = inbound("stable");
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound)).thenReturn(new ThreeXUiInboundSettings(List.of(
+                ThreeXUiVlessClient.create("stable-client", "stable-email", EXPIRY.toEpochMilli()))));
+        stubConfiguration(inbound, "stable-client");
+
+        ProvisionedVpnAccess result = provider.provision(new VpnProvisionRequest(
+                SUBSCRIPTION_ID, 123L, EXPIRY, "stable-client"));
+        assertThat(result.externalAccessId()).isEqualTo("stable-client");
+    }
+
+    @Test
+    void extendMissingIdentityIsRejectedWithoutMutation() {
+        ThreeXUiInboundResponse inbound = inbound("missing");
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound)).thenReturn(new ThreeXUiInboundSettings(List.of()));
+        assertThatThrownBy(() -> provider.extend(new VpnExtensionRequest("missing", EXPIRY)))
+                .isInstanceOf(ru.murad.myvpn.exception.ThreeXUiNotFoundException.class);
+        verify(inboundClient, never()).updateClient(any(), any(), any());
+    }
+
+    @Test
+    void providerResultRenderingDoesNotExposeConfiguration() {
+        ThreeXUiInboundResponse inbound = inbound();
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound)).thenReturn(new ThreeXUiInboundSettings(List.of(client(EXPIRY.toEpochMilli()))));
+        stubConfiguration(inbound);
+        assertThat(provider.provision(provisionRequest()).toString()).doesNotContain("vless://generated");
+    }
+
+    @Test
     void shouldTreatMissingClientAsAlreadyRevoked() {
         ThreeXUiInboundResponse inbound = inbound();
         when(inboundClient.getInbound(any())).thenReturn(inbound);
@@ -240,11 +303,15 @@ class ThreeXUiVpnProviderTest {
     }
 
     private void stubConfiguration(ThreeXUiInboundResponse inbound) {
+        stubConfiguration(inbound, SUBSCRIPTION_ID.toString());
+    }
+
+    private void stubConfiguration(ThreeXUiInboundResponse inbound, String clientId) {
         VlessConfigurationData data = new VlessConfigurationData(
-                SUBSCRIPTION_ID.toString(), "vpn.example.test", 443,
+                clientId, "vpn.example.test", 443,
                 "tcp", "reality", "none", "", "server.example",
                 "chrome", "public-key", "abcd", "/", "MyVPN");
-        when(configurationMapper.map(inbound, SUBSCRIPTION_ID.toString()))
+        when(configurationMapper.map(inbound, clientId))
                 .thenReturn(data);
         when(configurationFactory.create(data)).thenReturn("vless://generated");
     }

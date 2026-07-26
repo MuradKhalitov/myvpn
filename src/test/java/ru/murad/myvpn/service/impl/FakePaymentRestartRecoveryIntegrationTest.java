@@ -19,7 +19,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import ru.murad.myvpn.client.FakePaymentProvider;
 import ru.murad.myvpn.dto.CreatePaymentCommand;
 import ru.murad.myvpn.dto.PreparedPaymentVerification;
@@ -78,7 +78,7 @@ class FakePaymentRestartRecoveryIntegrationTest {
 
     @Container
     static final PostgreSQLContainer POSTGRESQL =
-            new PostgreSQLContainer("postgres:16.3-alpine");
+            new PostgreSQLContainer<>("postgres:16.3-alpine");
 
     @DynamicPropertySource
     static void configurePostgresql(DynamicPropertyRegistry registry) {

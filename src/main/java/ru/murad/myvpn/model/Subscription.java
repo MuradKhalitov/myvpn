@@ -88,6 +88,14 @@ public class Subscription {
         this.updatedAt = now;
     }
 
+    public void setActivationTarget(VpnTariff tariff, long telegramId, Instant target, Instant now) {
+        this.tariff = tariff;
+        this.expiresAt = target;
+        this.activatedByTelegramId = telegramId;
+        this.activatedAt = now;
+        this.updatedAt = now;
+    }
+
     public void activate(Instant now) {
         this.status = SubscriptionStatus.ACTIVE;
         this.updatedAt = now;

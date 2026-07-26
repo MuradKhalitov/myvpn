@@ -13,7 +13,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import ru.murad.myvpn.config.ThreeXUiProperties;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
 import ru.murad.myvpn.exception.ThreeXUiUncertainException;
@@ -62,7 +62,7 @@ class ThreeXUiProvisioningIntegrationTest {
 
     @Container
     static final PostgreSQLContainer POSTGRESQL =
-            new PostgreSQLContainer("postgres:16.3-alpine");
+            new PostgreSQLContainer<>("postgres:16.3-alpine");
 
     @DynamicPropertySource
     static void configurePostgresql(DynamicPropertyRegistry registry) {

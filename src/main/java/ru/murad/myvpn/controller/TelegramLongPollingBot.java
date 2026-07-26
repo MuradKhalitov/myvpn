@@ -1,6 +1,7 @@
 package ru.murad.myvpn.controller;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
@@ -32,6 +33,7 @@ public class TelegramLongPollingBot
     private final TelegramCommandService commandService;
     private final TelegramClient telegramClient;
 
+    @Autowired
     public TelegramLongPollingBot(
             TelegramProperties properties,
             TelegramCommandService commandService

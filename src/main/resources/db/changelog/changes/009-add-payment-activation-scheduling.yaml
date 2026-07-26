@@ -1,0 +1,24 @@
+databaseChangeLog:
+  - changeSet:
+      id: 009-add-payment-activation-scheduling
+      author: myvpn
+      changes:
+        - addColumn:
+            tableName: payment_orders
+            columns:
+              - column: { name: next_activation_at, type: "timestamp with time zone" }
+        - createIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_activation_queue
+            columns:
+              - column: { name: status }
+              - column: { name: activation_status }
+              - column: { name: next_activation_at }
+              - column: { name: activation_lease_until }
+      rollback:
+        - dropIndex:
+            tableName: payment_orders
+            indexName: idx_payment_orders_activation_queue
+        - dropColumn:
+            tableName: payment_orders
+            columnName: next_activation_at

@@ -12,7 +12,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import ru.murad.myvpn.client.FakePaymentProvider;
 import ru.murad.myvpn.dto.TelegramCallbackQuery;
 import ru.murad.myvpn.dto.TelegramIncomingMessage;
@@ -44,7 +44,7 @@ class PaymentVerificationTelegramIntegrationTest {
 
     @Container
     static final PostgreSQLContainer POSTGRESQL =
-            new PostgreSQLContainer("postgres:16.3-alpine");
+            new PostgreSQLContainer<>("postgres:16.3-alpine");
 
     @DynamicPropertySource
     static void configure(DynamicPropertyRegistry registry) {

@@ -2,9 +2,11 @@ package ru.murad.myvpn.client;
 
 public interface VpnProvider {
 
+    String providerName();
+
     ProvisionedVpnAccess provision(VpnProvisionRequest request);
 
-    void extend(VpnExtensionRequest request);
+    ProvisionedVpnAccess extend(VpnExtensionRequest request);
 
     void revoke(String externalAccessId);
 }

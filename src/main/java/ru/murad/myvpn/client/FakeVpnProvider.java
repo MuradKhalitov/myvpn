@@ -16,15 +16,22 @@ public class FakeVpnProvider implements VpnProvider {
     private static final String PROVIDER_NAME = "FAKE";
 
     @Override
-    public ProvisionedVpnAccess provision(VpnProvisionRequest request) {
-        String externalAccessId = UUID.randomUUID().toString();
-        String configuration = "fake-vpn://" + externalAccessId;
-        return new ProvisionedVpnAccess(PROVIDER_NAME, externalAccessId, configuration);
+    public String providerName() {
+        return PROVIDER_NAME;
     }
 
     @Override
-    public void extend(VpnExtensionRequest request) {
+    public ProvisionedVpnAccess provision(VpnProvisionRequest request) {
+        String externalAccessId = request.stableExternalAccessId() == null
+                ? request.subscriptionId().toString() : request.stableExternalAccessId();
+        String configuration = "fake-vpn://" + externalAccessId;
+        return new ProvisionedVpnAccess(PROVIDER_NAME, externalAccessId, configuration, request.expiresAt());
+    }
+
+    @Override
+    public ProvisionedVpnAccess extend(VpnExtensionRequest request) {
         // The fake provider has no external state to update.
+        return new ProvisionedVpnAccess(PROVIDER_NAME, request.externalAccessId(), null, request.expiresAt());
     }
 
     @Override

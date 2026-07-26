@@ -21,7 +21,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.containers.PostgreSQLContainer;
 import ru.murad.myvpn.dto.PaymentVerificationOutcome;
 import ru.murad.myvpn.dto.PaymentVerificationResult;
 import ru.murad.myvpn.dto.PaymentCheckoutResult;
@@ -100,7 +100,7 @@ class PaymentVerificationTransactionServiceIntegrationTest {
 
     @Container
     static final PostgreSQLContainer POSTGRESQL =
-            new PostgreSQLContainer("postgres:16.3-alpine");
+            new PostgreSQLContainer<>("postgres:16.3-alpine");
 
     @DynamicPropertySource
     static void configurePostgresql(DynamicPropertyRegistry registry) {

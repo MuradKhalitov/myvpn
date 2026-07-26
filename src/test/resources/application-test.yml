@@ -14,3 +14,7 @@ payment:
   verification:
     min-interval: 1ns
     max-clock-skew: 5m
+
+vpn:
+  provider:
+    allow-fake: true

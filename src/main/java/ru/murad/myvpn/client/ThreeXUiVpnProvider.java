@@ -21,6 +21,11 @@ import java.util.Optional;
 public class ThreeXUiVpnProvider implements VpnProvider {
 
     private static final String PROVIDER_NAME = "3X_UI";
+
+    @Override
+    public String providerName() {
+        return PROVIDER_NAME;
+    }
     private static final String EMAIL_PREFIX = "myvpn-";
 
     private final ThreeXUiInboundClient inboundClient;
@@ -44,7 +49,8 @@ public class ThreeXUiVpnProvider implements VpnProvider {
     public ProvisionedVpnAccess provision(VpnProvisionRequest request) {
         ThreeXUiRequestBudget budget =
                 new ThreeXUiRequestBudget(properties.maxRequestsPerOperation());
-        String clientUuid = request.subscriptionId().toString();
+        String clientUuid = request.stableExternalAccessId() == null
+                ? request.subscriptionId().toString() : request.stableExternalAccessId();
         ThreeXUiVlessClient client = ThreeXUiVlessClient.create(
                 clientUuid, EMAIL_PREFIX + clientUuid, request.expiresAt().toEpochMilli());
         for (int attempt = 1; attempt <= properties.maxMutationAttempts(); attempt++) {
@@ -93,7 +99,7 @@ public class ThreeXUiVpnProvider implements VpnProvider {
     }
 
     @Override
-    public void extend(VpnExtensionRequest request) {
+    public ProvisionedVpnAccess extend(VpnExtensionRequest request) {
         ThreeXUiRequestBudget budget =
                 new ThreeXUiRequestBudget(properties.maxRequestsPerOperation());
         for (int attempt = 1; attempt <= properties.maxMutationAttempts(); attempt++) {
@@ -106,7 +112,7 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                 long expectedExpiry = request.expiresAt().toEpochMilli();
                 if (existing.expiryTime() != null
                         && existing.expiryTime() == expectedExpiry) {
-                    return;
+                    return extensionResult(existing);
                 }
                 budget.reserveReconciliation();
                 inboundClient.updateClient(
@@ -117,13 +123,13 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                 if (isExpiryAppliedAndOthersPreserved(
                         inbound, request.externalAccessId(),
                         expectedExpiry, budget)) {
-                    return;
+                    return extensionResult(findClient(inboundClient.getInboundForReconciliation(budget), request.externalAccessId()).orElseThrow());
                 }
             } catch (ThreeXUiRetryableException exception) {
                 try {
                     if (isExpiryApplied(request.externalAccessId(),
                             request.expiresAt().toEpochMilli(), budget, true)) {
-                        return;
+                        return extensionResult(findClient(inboundClient.getInboundForReconciliation(budget), request.externalAccessId()).orElseThrow());
                     }
                 } catch (ThreeXUiRetryableException ignored) {
                     // The update remains uncertain within the current attempt.
@@ -139,6 +145,11 @@ public class ThreeXUiVpnProvider implements VpnProvider {
             }
         }
         throw new ThreeXUiException("3x-ui client extension was not confirmed");
+    }
+
+    private ProvisionedVpnAccess extensionResult(ThreeXUiVlessClient client) {
+        return new ProvisionedVpnAccess(PROVIDER_NAME, client.id(), null,
+                java.time.Instant.ofEpochMilli(client.expiryTime()));
     }
 
     @Override
@@ -245,7 +256,8 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                 throw new ThreeXUiException("Incomplete VLESS configuration");
             }
             return new ProvisionedVpnAccess(
-                    PROVIDER_NAME, client.id(), configuration);
+                    PROVIDER_NAME, client.id(), configuration,
+                    java.time.Instant.ofEpochMilli(client.expiryTime()));
         } catch (RuntimeException exception) {
             throw new ThreeXUiUncertainException();
         }

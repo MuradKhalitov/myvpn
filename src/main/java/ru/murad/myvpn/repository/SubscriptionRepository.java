@@ -24,6 +24,8 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
 
     List<Subscription> findAllByStatus(SubscriptionStatus status);
 
+    List<Subscription> findAllByUserIdAndStatus(UUID userId, SubscriptionStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select subscription from Subscription subscription where subscription.id = :id")
     Optional<Subscription> findByIdForUpdate(@Param("id") UUID id);

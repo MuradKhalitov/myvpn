@@ -6,3 +6,7 @@ spring:
 
 payment:
   allow-fake: true
+
+vpn:
+  provider:
+    allow-fake: true

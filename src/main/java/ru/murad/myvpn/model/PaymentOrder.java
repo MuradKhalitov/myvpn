@@ -130,8 +130,14 @@ public class PaymentOrder {
     @Column(name = "activation_attempts", nullable = false)
     private Integer activationAttempts;
 
+    @Column(name = "next_activation_at")
+    private Instant nextActivationAt;
+
     @Column(name = "safe_failure_code", length = 64)
     private String safeFailureCode;
+
+    @Column(name = "activation_completed_at")
+    private Instant activationCompletedAt;
 
     @Version
     @Column(nullable = false)
@@ -350,6 +356,7 @@ public class PaymentOrder {
         }
         long newGeneration = nextActivationGeneration();
         activationStatus = PaymentActivationStatus.PROCESSING;
+        activationCompletedAt = null;
         activationClaimToken = claimToken;
         activationGeneration = newGeneration;
         activationLeaseUntil = leaseUntil;
@@ -401,6 +408,7 @@ public class PaymentOrder {
         activationClaimToken = newClaimToken;
         activationGeneration = newGeneration;
         activationLeaseUntil = newLeaseUntil;
+        activationCompletedAt = null;
         activationAttempts++;
         updatedAt = now;
         return newGeneration;
@@ -438,6 +446,44 @@ public class PaymentOrder {
         completeClaim(
                 claimToken, claimGeneration,
                 PaymentActivationStatus.RETRY_REQUIRED, now);
+    }
+
+    public void scheduleRetry(UUID claimToken, long claimGeneration, Instant now, Instant nextAttemptAt) {
+        Objects.requireNonNull(nextAttemptAt, "nextAttemptAt");
+        requireCurrentClaim(claimToken, claimGeneration);
+        if (nextAttemptAt.isBefore(now)) throw new PaymentOrderValidationException("Retry time must not be before now");
+        nextActivationAt = nextAttemptAt.truncatedTo(ChronoUnit.MICROS);
+        completeClaim(claimToken, claimGeneration, PaymentActivationStatus.RETRY_REQUIRED, now);
+    }
+
+    public void attachSubscription(Subscription subscription, Instant now) {
+        Objects.requireNonNull(subscription, "subscription");
+        if (this.subscription != null && !this.subscription.getId().equals(subscription.getId())) {
+            throw new PaymentStateTransitionException("Payment order is already linked to another subscription");
+        }
+        this.subscription = subscription;
+        this.updatedAt = now;
+    }
+
+    public void setSafeFailureCode(String failureCode) {
+        this.safeFailureCode = validateFailureCode(failureCode);
+    }
+
+    public void markAttemptsExhausted(Instant now) {
+        Objects.requireNonNull(now, "now");
+        if (status != PaymentStatus.SUCCEEDED ||
+                (activationStatus != PaymentActivationStatus.PENDING
+                        && activationStatus != PaymentActivationStatus.RETRY_REQUIRED
+                        && activationStatus != PaymentActivationStatus.PROCESSING)) {
+            throw new PaymentStateTransitionException("Activation attempt limit transition is not allowed");
+        }
+        activationStatus = PaymentActivationStatus.MANUAL_REVIEW_REQUIRED;
+        activationClaimToken = null;
+        activationLeaseUntil = null;
+        nextActivationAt = null;
+        activationCompletedAt = null;
+        safeFailureCode = "ACTIVATION_MAX_ATTEMPTS_REACHED";
+        updatedAt = now;
     }
 
     public void markReconciliationRequired(
@@ -481,6 +527,10 @@ public class PaymentOrder {
         activationStatus = target;
         activationClaimToken = null;
         activationLeaseUntil = null;
+        if (target != PaymentActivationStatus.RETRY_REQUIRED) nextActivationAt = null;
+        if (target != PaymentActivationStatus.RETRY_REQUIRED) safeFailureCode = null;
+        activationCompletedAt = target == PaymentActivationStatus.ACTIVATED
+                ? validatedNow.truncatedTo(ChronoUnit.MICROS) : null;
         updatedAt = validatedNow;
     }
 
@@ -606,13 +656,8 @@ public class PaymentOrder {
 
     @Override
     public String toString() {
-        return "PaymentOrder[id=" + id
-                + ", provider=" + provider
+        return "PaymentOrder[provider=" + provider
                 + ", status=" + status
-                + ", activationStatus=" + activationStatus
-                + ", amount=" + amount
-                + ", currency=" + currency
-                + ", createdAt=" + createdAt
-                + ", version=" + version + "]";
+                + ", activationStatus=" + activationStatus + "]";
     }
 }
