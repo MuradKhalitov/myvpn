@@ -1,0 +1,14 @@
+# Shared runtime hardening is inherited from application.yml.
+# Staging deliberately exercises a real 3x-ui provider with fake payments only.
+payment:
+  provider: ${PAYMENT_PROVIDER:fake}
+  allow-fake: ${PAYMENT_ALLOW_FAKE:false}
+  activation:
+    enabled: ${PAYMENT_ACTIVATION_ENABLED:true}
+
+vpn:
+  delivery:
+    enabled: ${VPN_DELIVERY_ENABLED:true}
+  provider:
+    type: ${VPN_PROVIDER_TYPE:3x-ui}
+    allow-fake: false

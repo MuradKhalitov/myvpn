@@ -1,0 +1,14 @@
+.git
+.idea
+.vscode
+target
+.env
+.env-*
+.env.staging
+*.log
+docker data
+docker-data
+test reports
+test-reports
+**/surefire-reports
+**/failsafe-reports

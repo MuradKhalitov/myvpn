@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:16.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - myvpn-postgres-data:/var/lib/postgresql/data
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 40s
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:?SPRING_PROFILES_ACTIVE is required}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
+      DB_USERNAME: ${POSTGRES_USER:?POSTGRES_USER is required}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      JAVA_OPTS: -XX:InitialRAMPercentage=25.0 -XX:MaxRAMPercentage=75.0
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
+      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS:?TELEGRAM_ADMIN_IDS is required}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:?PAYMENT_PROVIDER is required}
+      PAYMENT_ALLOW_FAKE: ${PAYMENT_ALLOW_FAKE:?PAYMENT_ALLOW_FAKE is required}
+      PAYMENT_ACTIVATION_ENABLED: ${PAYMENT_ACTIVATION_ENABLED:?PAYMENT_ACTIVATION_ENABLED is required}
+      VPN_PROVIDER_TYPE: ${VPN_PROVIDER_TYPE:?VPN_PROVIDER_TYPE is required}
+      VPN_PROVIDER_ALLOW_FAKE: ${VPN_PROVIDER_ALLOW_FAKE:?VPN_PROVIDER_ALLOW_FAKE is required}
+      VPN_DELIVERY_ENABLED: ${VPN_DELIVERY_ENABLED:?VPN_DELIVERY_ENABLED is required}
+      THREEXUI_BASE_URL: ${THREEXUI_BASE_URL:?THREEXUI_BASE_URL is required}
+      THREEXUI_WEB_BASE_PATH: ${THREEXUI_WEB_BASE_PATH:?THREEXUI_WEB_BASE_PATH is required}
+      THREEXUI_USERNAME: ${THREEXUI_USERNAME:?THREEXUI_USERNAME is required}
+      THREEXUI_PASSWORD: ${THREEXUI_PASSWORD:?THREEXUI_PASSWORD is required}
+      THREEXUI_INBOUND_ID: ${THREEXUI_INBOUND_ID:?THREEXUI_INBOUND_ID is required}
+      THREEXUI_PUBLIC_HOST: ${THREEXUI_PUBLIC_HOST:?THREEXUI_PUBLIC_HOST is required}
+      THREEXUI_PUBLIC_PORT_OVERRIDE: ${THREEXUI_PUBLIC_PORT_OVERRIDE:-}
+      THREEXUI_CONNECT_TIMEOUT: ${THREEXUI_CONNECT_TIMEOUT:?THREEXUI_CONNECT_TIMEOUT is required}
+      THREEXUI_READ_TIMEOUT: ${THREEXUI_READ_TIMEOUT:?THREEXUI_READ_TIMEOUT is required}
+      THREEXUI_MAX_MUTATION_ATTEMPTS: ${THREEXUI_MAX_MUTATION_ATTEMPTS:?THREEXUI_MAX_MUTATION_ATTEMPTS is required}
+      THREEXUI_MAX_REQUESTS_PER_OPERATION: ${THREEXUI_MAX_REQUESTS_PER_OPERATION:?THREEXUI_MAX_REQUESTS_PER_OPERATION is required}
+      THREEXUI_RETRY_INITIAL_DELAY: ${THREEXUI_RETRY_INITIAL_DELAY:?THREEXUI_RETRY_INITIAL_DELAY is required}
+      THREEXUI_RETRY_MAX_DELAY: ${THREEXUI_RETRY_MAX_DELAY:?THREEXUI_RETRY_MAX_DELAY is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - application
+      - database
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  myvpn-postgres-data:
+
+networks:
+  application:
+  database:
+    internal: true

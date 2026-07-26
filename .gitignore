@@ -25,5 +25,9 @@ target/
 ### Local environment and secrets ###
 .env
 .env-*
+.env.server
+!.env.server.example
+.env.staging
+!.env.staging.example
 application-secrets.yml
 *.log

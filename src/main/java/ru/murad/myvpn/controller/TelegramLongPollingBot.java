@@ -3,6 +3,7 @@ package ru.murad.myvpn.controller;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.longpolling.interfaces.LongPollingUpdateConsumer;
@@ -25,7 +26,8 @@ import java.util.List;
 
 @Slf4j
 @Component
-@Profile("local")
+@Profile("!test")
+@DependsOn("telegramLongPollingInstanceLock")
 public class TelegramLongPollingBot
         implements SpringLongPollingBot, LongPollingUpdateConsumer {
 

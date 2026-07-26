@@ -1,0 +1,12 @@
+payment:
+  provider: ${PAYMENT_PROVIDER:?PAYMENT_PROVIDER is required in production}
+  allow-fake: ${PAYMENT_ALLOW_FAKE:false}
+  activation:
+    enabled: ${PAYMENT_ACTIVATION_ENABLED:true}
+
+vpn:
+  delivery:
+    enabled: ${VPN_DELIVERY_ENABLED:true}
+  provider:
+    type: ${VPN_PROVIDER_TYPE:?VPN_PROVIDER_TYPE is required in production}
+    allow-fake: ${VPN_PROVIDER_ALLOW_FAKE:false}

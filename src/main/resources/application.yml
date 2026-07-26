@@ -9,13 +9,35 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+    show-sql: false
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
+    enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
+
+server:
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+  health:
+    defaults:
+      enabled: true
 
 logging:
   level:
+    root: INFO
+    org.springframework: INFO
     org.springframework.web.reactive.function.client: WARN
     reactor.netty.http.client: WARN
+    org.telegram: INFO
 
 telegram:
   admin-ids: ${TELEGRAM_ADMIN_IDS:}
