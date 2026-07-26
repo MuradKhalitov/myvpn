@@ -26,6 +26,7 @@ class PaymentActivationDeliveryPostgresIntegrationTest {
     @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16.3-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) { r.add("spring.datasource.url", POSTGRES::getJdbcUrl); r.add("spring.datasource.username", POSTGRES::getUsername); r.add("spring.datasource.password", POSTGRES::getPassword); }
     @Autowired PaymentActivationTransactionService activation; @Autowired PaymentOrderRepository orders; @Autowired VpnDeliveryRepository deliveries;
+    @Autowired VpnDeliveryTransactionService deliveryTransactions;
     @Autowired TelegramUserRepository users; @Autowired VpnTariffRepository tariffs; @Autowired SubscriptionRepository subscriptions; @Autowired VpnAccessRepository accesses; @Autowired JdbcTemplate jdbc;
     @Autowired EntityManager entityManager;
     @BeforeEach void clean() { deliveries.deleteAll(); orders.deleteAll(); accesses.deleteAll(); subscriptions.deleteAll(); users.deleteAll(); tariffs.deleteAll(); }
@@ -57,6 +58,22 @@ class PaymentActivationDeliveryPostgresIntegrationTest {
         assertThat(subscriptions.count()).isOne(); assertThat(accesses.count()).isOne(); assertThat(accesses.findAll().get(0).getExternalAccessId()).isEqualTo(identity); assertThat(deliveries.count()).isEqualTo(3);
         assertThat(subscriptions.findAll().get(0).getExpiresAt()).isAfter(initialExpiry); assertThat(deliveries.findAll()).extracting(d -> d.getSourcePaymentOrder().getId()).doesNotHaveDuplicates();
     }
+    @Test void provisionAndExtendSnapshotsUseFlushedVersionsAndCanCompleteDelivery() {
+        PaymentOrder provision = succeededOrder();
+        PreparedPaymentActivation provisionClaim = activation.claimActivations(NOW, 10).get(0);
+        assertThat(activation.complete(provisionClaim, result(provisionClaim, "fake-vpn://test"), NOW))
+                .isEqualTo(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED);
+        assertSnapshotMatchesPersistedVersionsAndCompletes(provision.getId(), NOW.plusSeconds(1));
+
+        PaymentOrder extension = succeededOrder();
+        PreparedPaymentActivation extensionClaim = activation.claimActivations(NOW.plusSeconds(2), 10).stream()
+                .filter(candidate -> candidate.paymentOrderId().equals(extension.getId())).findFirst().orElseThrow();
+        assertThat(activation.complete(extensionClaim,
+                new ProvisionedVpnAccess("FAKE", extensionClaim.stableExternalClientId(), null,
+                        extensionClaim.targetExpiresAt()), NOW.plusSeconds(2)))
+                .isEqualTo(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED);
+        assertSnapshotMatchesPersistedVersionsAndCompletes(extension.getId(), NOW.plusSeconds(3));
+    }
     @Test void foreignAccessInForgedExtendCompletionRollsBackActivationAndDelivery() {
         PaymentOrder first = succeededOrder(); PreparedPaymentActivation firstClaim = activation.claimActivations(NOW, 10).get(0);
         activation.complete(firstClaim, result(firstClaim, "fake-vpn://secret"), NOW);
@@ -84,6 +101,22 @@ class PaymentActivationDeliveryPostgresIntegrationTest {
         assertThat(deliveries.count()).isEqualTo(1);
     }
     private void entityManagerClear() { entityManager.clear(); }
+    private void assertSnapshotMatchesPersistedVersionsAndCompletes(UUID orderId, Instant claimedAt) {
+        entityManager.clear();
+        VpnDelivery delivery = deliveries.findAll().stream()
+                .filter(candidate -> candidate.getSourcePaymentOrder().getId().equals(orderId)).findFirst().orElseThrow();
+        Subscription subscription = subscriptions.findById(delivery.getSubscription().getId()).orElseThrow();
+        VpnAccess access = accesses.findById(delivery.getVpnAccess().getId()).orElseThrow();
+        assertThat(delivery.getSubscriptionVersion()).isEqualTo(subscription.getVersion());
+        assertThat(delivery.getVpnAccessVersion()).isEqualTo(access.getVersion());
+        ClaimedVpnDelivery claim = deliveryTransactions.claim(claimedAt, 10).stream()
+                .filter(candidate -> candidate.deliveryId().equals(delivery.getId())).findFirst().orElseThrow();
+        assertThat(deliveryTransactions.delivered(claim, 1L, claimedAt.plusMillis(1))).isTrue();
+        entityManager.clear();
+        VpnDelivery reread = deliveries.findById(delivery.getId()).orElseThrow();
+        assertThat(reread.getStatus()).isEqualTo(VpnDeliveryStatus.DELIVERED);
+        assertThat(reread.getDeliveredAt()).isNotNull();
+    }
     private PaymentOrder succeededOrder() { TelegramUser user = users.findAll().stream().findFirst().orElseGet(() -> users.save(TelegramUser.builder().id(UUID.randomUUID()).telegramId(8001L).chatId(8001L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build())); VpnTariff tariff = tariffs.findAll().stream().findFirst().orElseGet(() -> tariffs.save(VpnTariff.builder().id(UUID.randomUUID()).code("MONTH").name("Month").durationDays(30).price(new BigDecimal("90.00")).currency("RUB").active(true).createdAt(NOW).updatedAt(NOW).build())); PaymentOrder order = PaymentOrder.create(user, tariff, PaymentProviderType.FAKE, NOW, Duration.ofHours(1)); order.markCreating(NOW); order.markPending(UUID.randomUUID().toString(), "https://example.invalid", NOW, null, NOW); order.markSucceeded(NOW, NOW); return orders.saveAndFlush(order); }
     private ProvisionedVpnAccess result(PreparedPaymentActivation claim, String config) { return new ProvisionedVpnAccess("FAKE", claim.stableExternalClientId(), config, claim.targetExpiresAt()); }
     private String sha(String value) { try { byte[] bytes = java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)); StringBuilder out = new StringBuilder(); for (byte b : bytes) out.append(String.format("%02x", b)); return out.toString(); } catch (Exception e) { throw new AssertionError(e); } }

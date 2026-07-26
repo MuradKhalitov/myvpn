@@ -1,5 +1,6 @@
 package ru.murad.myvpn.service.impl;
 
+import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +33,7 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
     private final VpnAccessRepository accesses;
     private final VpnTariffRepository tariffs;
     private final VpnDeliveryRepository deliveries;
+    private final EntityManager entityManager;
     private final PaymentProperties properties;
     private final VpnProvider vpnProvider;
 
@@ -152,6 +154,9 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
             throw new PaymentOrderValidationException("VPN configuration is unavailable for delivery");
         }
         validateDeliveryRelationshipGraph(order, subscription, deliveryAccess);
+        // The outbox snapshots optimistic-lock versions. Flush the preceding subscription/access
+        // mutation first so Hibernate has populated their persisted @Version values.
+        entityManager.flush();
         VpnDeliveryType deliveryType = p.action() == PaymentActivationAction.PROVISION
                 ? VpnDeliveryType.ACTIVATION_PROVISION : VpnDeliveryType.ACTIVATION_EXTEND;
         deliveries.save(VpnDelivery.automatic(order.getUser(), subscription, deliveryAccess, order,
