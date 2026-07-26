@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.Locale;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
@@ -21,13 +22,18 @@ import ru.murad.myvpn.service.VpnConfigurationDeliveryGateway;
  * Telegram-specific adapter. It logs neither content nor recipient identity.
  */
 @Component
-@Profile("local")
+@Profile("!test")
+@ConditionalOnProperty(name = "vpn.delivery.enabled", havingValue = "true")
 public class TelegramVpnConfigurationDeliveryGateway implements VpnConfigurationDeliveryGateway {
 
     private final org.telegram.telegrambots.meta.generics.TelegramClient client;
 
     @Autowired
     public TelegramVpnConfigurationDeliveryGateway(TelegramProperties properties) {
+        if (properties.botToken().isBlank()) {
+            throw new IllegalStateException(
+                    "Telegram bot token is required when VPN delivery is enabled");
+        }
         this.client = new OkHttpTelegramClient(properties.botToken());
     }
 
