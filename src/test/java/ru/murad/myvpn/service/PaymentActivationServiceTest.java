@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
@@ -55,6 +56,31 @@ class PaymentActivationServiceTest {
         inOrder.verify(transactions).claimActivations(NOW, 20);
         inOrder.verify(provider).provision(new VpnProvisionRequest(prepared.userId(), 0L, TARGET, prepared.stableExternalClientId()));
         inOrder.verify(transactions).complete(prepared, result, NOW);
+    }
+
+    @Test
+    void providerResolvedProvisionTargetIsFixedBeforeMutation() {
+        PreparedPaymentActivation unresolved = prepared(PaymentActivationAction.PROVISION)
+                .withTargetExpiresAt(null);
+        PreparedPaymentActivation fixed = unresolved.withTargetExpiresAt(TARGET);
+        ProvisionedVpnAccess result = result(fixed, "config");
+        when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(unresolved));
+        when(provider.resolveProvisionTarget(
+                new VpnProvisionRequest(unresolved.userId(), 0L, null,
+                        unresolved.stableExternalClientId()), 30, NOW)).thenReturn(TARGET);
+        when(transactions.fixProvisionTarget(unresolved, TARGET, NOW))
+                .thenReturn(Optional.of(fixed));
+        when(provider.provision(new VpnProvisionRequest(fixed.userId(), 0L, TARGET,
+                fixed.stableExternalClientId()))).thenReturn(result);
+        when(transactions.complete(fixed, result, NOW))
+                .thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
+
+        assertThat(service.processPendingActivations(20).succeeded()).isEqualTo(1);
+        InOrder order = inOrder(transactions, provider);
+        order.verify(provider).resolveProvisionTarget(any(), eq(30), eq(NOW));
+        order.verify(transactions).fixProvisionTarget(unresolved, TARGET, NOW);
+        order.verify(provider).provision(new VpnProvisionRequest(fixed.userId(), 0L, TARGET,
+                fixed.stableExternalClientId()));
     }
 
     @Test

@@ -29,6 +29,37 @@ public class ThreeXUiVpnProvider implements VpnProvider {
     public String providerName() {
         return PROVIDER_NAME;
     }
+
+    @Override
+    public java.time.Instant resolveProvisionTarget(
+            VpnProvisionRequest request,
+            int durationDays,
+            java.time.Instant now
+    ) {
+        if (request == null || request.stableExternalAccessId() == null
+                || request.stableExternalAccessId().isBlank() || durationDays <= 0 || now == null) {
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "Invalid 3x-ui provision target request");
+        }
+        ThreeXUiRequestBudget budget =
+                new ThreeXUiRequestBudget(properties.maxRequestsPerOperation());
+        ThreeXUiInboundResponse inbound = inboundClient.getInbound(budget);
+        validateConfiguredInbound(inbound);
+        Optional<ThreeXUiVlessClient> existing =
+                findProvisioningClient(inbound, request.stableExternalAccessId());
+        java.time.Instant base = existing
+                .map(ThreeXUiVlessClient::expiryTime)
+                .filter(expiry -> expiry > now.toEpochMilli())
+                .map(java.time.Instant::ofEpochMilli)
+                .orElse(now);
+        try {
+            return java.time.Instant.ofEpochMilli(base
+                    .plus(java.time.Duration.ofDays(durationDays)).toEpochMilli());
+        } catch (java.time.DateTimeException | ArithmeticException exception) {
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "3x-ui provision target cannot be calculated");
+        }
+    }
     private static final String EMAIL_PREFIX = "myvpn-";
 
     private final ThreeXUiInboundClient inboundClient;

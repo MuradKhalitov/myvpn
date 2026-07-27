@@ -46,34 +46,40 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
         Counters counters = new Counters();
         for (PreparedPaymentActivation prepared : claimed) {
             assertNoActiveTransaction();
-            ProviderCall providerCall = buildProviderCall(prepared);
+            validatePreparedActivation(prepared);
             try {
+                PreparedPaymentActivation resolved = resolveProvisionTarget(prepared);
+                if (resolved == null) {
+                    counters.skipped++;
+                    continue;
+                }
+                ProviderCall providerCall = buildProviderCall(resolved);
                 ProvisionedVpnAccess result;
                 try {
                     result = invokeProviderOnly(providerCall);
                 } catch (PaymentProviderUncertainException | VpnProviderUncertainException
                          | ThreeXUiUncertainException | ThreeXUiRetryableException ex) {
-                    applyOutcome(counters, transactions.retry(prepared,
+                    applyOutcome(counters, transactions.retry(resolved,
                             PaymentActivationFailureCode.VPN_PROVIDER_TRANSIENT.name(), clock.instant()));
                     continue;
                 } catch (PaymentProviderPermanentException | VpnProviderPermanentException | ThreeXUiException ex) {
-                    applyOutcome(counters, transactions.manualReview(prepared,
+                    applyOutcome(counters, transactions.manualReview(resolved,
                             permanentFailureCode(ex), clock.instant()));
                     continue;
                 } catch (RuntimeException unexpectedProviderFailure) {
-                    applyOutcome(counters, transactions.retry(prepared,
+                    applyOutcome(counters, transactions.retry(resolved,
                             PaymentActivationFailureCode.ACTIVATION_PROVIDER_UNEXPECTED.name(), clock.instant()));
                     continue;
                 }
 
                 PaymentActivationTransactionService.PaymentActivationOutcome outcome;
                 try {
-                    outcome = transactions.complete(prepared, result, clock.instant());
+                    outcome = transactions.complete(resolved, result, clock.instant());
                 } catch (PaymentActivationResultMismatchException mismatch) {
-                    outcome = transactions.manualReview(prepared,
+                    outcome = transactions.manualReview(resolved,
                             PaymentActivationFailureCode.ACTIVATION_PROVIDER_RESULT_MISMATCH.name(), clock.instant());
                 } catch (PaymentOrderValidationException invalidResult) {
-                    outcome = transactions.manualReview(prepared,
+                    outcome = transactions.manualReview(resolved,
                             PaymentActivationFailureCode.VPN_PROVIDER_RESULT_INVALID.name(), clock.instant());
                 }
                 applyOutcome(counters, outcome);
@@ -85,6 +91,29 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
         }
         return new PaymentActivationWorkerResult(claimed.size(), exhausted, counters.succeeded, counters.retryScheduled,
                 counters.manualReview, counters.skipped, counters.infrastructureFailures);
+    }
+
+    private PreparedPaymentActivation resolveProvisionTarget(PreparedPaymentActivation prepared) {
+        if (prepared.action() != ru.murad.myvpn.service.PaymentActivationAction.PROVISION
+                || prepared.targetExpiresAt() != null) {
+            return prepared;
+        }
+        Instant now = clock.instant();
+        Instant target = vpnProvider.resolveProvisionTarget(
+                new VpnProvisionRequest(prepared.userId(), 0L, null,
+                        prepared.stableExternalClientId()),
+                prepared.durationDays(), now);
+        return transactions.fixProvisionTarget(prepared, target, now).orElse(null);
+    }
+
+    private void validatePreparedActivation(PreparedPaymentActivation prepared) {
+        if (prepared == null || prepared.action() == null || prepared.userId() == null
+                || prepared.stableExternalClientId() == null
+                || prepared.stableExternalClientId().isBlank()
+                || (prepared.action() == ru.murad.myvpn.service.PaymentActivationAction.EXTEND
+                && prepared.targetExpiresAt() == null)) {
+            throw new IllegalArgumentException("Prepared payment activation command is invalid");
+        }
     }
 
     private void assertNoActiveTransaction() {

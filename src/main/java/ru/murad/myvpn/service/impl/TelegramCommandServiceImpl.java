@@ -246,6 +246,11 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
                     "Команда доступна только для fake-платежей");
         }
         fakePaymentControlService.get().markSucceeded(order.getProviderPaymentId());
+        if (paymentProperties.provider() == PaymentProviderType.FAKE) {
+            return TelegramCommandResponse.text(
+                    "Fake payment имеет статус SUCCEEDED у провайдера.\n"
+                            + "Нажмите «Проверить оплату», чтобы бот подтвердил платёж.");
+        }
         return TelegramCommandResponse.text(
                 "Fake payment имеет статус SUCCEEDED у провайдера.");
     }
@@ -264,7 +269,7 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
         return switch (result.outcome()) {
             case SUCCEEDED, ALREADY_SUCCEEDED -> formatProviderStatus(new ProviderPayment("x", ProviderPaymentStatus.SUCCEEDED,
                     true, java.math.BigDecimal.ONE, "RUB", "fake", null, null, java.time.Instant.EPOCH, java.time.Instant.EPOCH))
-                    + " РџРѕРґРїРёСЃРєР° РѕР¶РёРґР°РµС‚ Р°РєС‚РёРІР°С†РёРё.";
+                    + " Подписка ожидает активации.";
             case CANCELED, ALREADY_CANCELED -> "РџР»Р°С‚РµР¶ РѕС‚РјРµРЅС‘РЅ.";
             case TOO_EARLY -> "РџСЂРѕРІРµСЂРєР° СѓР¶Рµ РІС‹РїРѕР»РЅСЏР»Р°СЃСЊ. РџРѕРїСЂРѕР±СѓР№С‚Рµ РЅРµРјРЅРѕРіРѕ РїРѕР·Р¶Рµ.";
             case MANUAL_REVIEW_REQUIRED -> "РџР»Р°С‚С‘Р¶ С‚СЂРµР±СѓРµС‚ СЂСѓС‡РЅРѕР№ РїСЂРѕРІРµСЂРєРё.";

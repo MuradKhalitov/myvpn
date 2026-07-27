@@ -21,6 +21,18 @@ public class FakeVpnProvider implements VpnProvider {
     }
 
     @Override
+    public java.time.Instant resolveProvisionTarget(
+            VpnProvisionRequest request,
+            int durationDays,
+            java.time.Instant now
+    ) {
+        if (durationDays <= 0) {
+            throw new IllegalArgumentException("Provision duration must be positive");
+        }
+        return now.plus(java.time.Duration.ofDays(durationDays));
+    }
+
+    @Override
     public ProvisionedVpnAccess provision(VpnProvisionRequest request) {
         String externalAccessId = request.stableExternalAccessId() == null
                 ? request.subscriptionId().toString() : request.stableExternalAccessId();

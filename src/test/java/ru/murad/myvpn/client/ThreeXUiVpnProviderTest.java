@@ -104,6 +104,58 @@ class ThreeXUiVpnProviderTest {
     }
 
     @Test
+    void provisionTargetForMissingClientStartsFromNow() {
+        ThreeXUiInboundResponse inbound = inbound("empty");
+        Instant now = Instant.parse("2026-07-25T10:00:00.123456Z");
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound))
+                .thenReturn(new ThreeXUiInboundSettings(List.of()));
+
+        assertThat(provider.resolveProvisionTarget(provisionRequest(), 30, now))
+                .isEqualTo(Instant.ofEpochMilli(now.plus(Duration.ofDays(30)).toEpochMilli()));
+    }
+
+    @Test
+    void provisionTargetForExistingActiveClientAddsPurchasedDurationOnce() {
+        ThreeXUiInboundResponse inbound = inbound("existing");
+        Instant now = Instant.parse("2026-07-25T10:00:00Z");
+        Instant existingExpiry = now.plus(Duration.ofDays(30));
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound)).thenReturn(new ThreeXUiInboundSettings(
+                List.of(client(existingExpiry.toEpochMilli()))));
+
+        assertThat(provider.resolveProvisionTarget(provisionRequest(), 30, now))
+                .isEqualTo(existingExpiry.plus(Duration.ofDays(30)));
+        verify(inboundClient, never()).addClient(any(), any());
+        verify(inboundClient, never()).updateClient(any(), any(), any());
+    }
+
+    @Test
+    void provisionTargetForExpiredClientStartsFromNow() {
+        ThreeXUiInboundResponse inbound = inbound("expired");
+        Instant now = Instant.parse("2026-07-25T10:00:00Z");
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound)).thenReturn(new ThreeXUiInboundSettings(
+                List.of(client(now.minusSeconds(1).toEpochMilli()))));
+
+        assertThat(provider.resolveProvisionTarget(provisionRequest(), 30, now))
+                .isEqualTo(now.plus(Duration.ofDays(30)));
+    }
+
+    @Test
+    void duplicateStableClientIdentityFailsBeforeMutation() {
+        ThreeXUiInboundResponse inbound = inbound("duplicate");
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound)).thenReturn(new ThreeXUiInboundSettings(List.of(
+                client(EXPIRY.toEpochMilli()), client(EXPIRY.toEpochMilli()))));
+
+        assertThatThrownBy(() -> provider.resolveProvisionTarget(provisionRequest(), 30, EXPIRY))
+                .isInstanceOf(ThreeXUiException.class);
+        verify(inboundClient, never()).addClient(any(), any());
+        verify(inboundClient, never()).updateClient(any(), any(), any());
+    }
+
+    @Test
     void shouldReconcileExistingClientWithStaleExpiryWithoutCreatingDuplicate() {
         ThreeXUiInboundResponse before = inbound("before");
         ThreeXUiInboundResponse after = inbound("after");
@@ -380,7 +432,8 @@ class ThreeXUiVpnProviderTest {
     }
 
     private VpnProvisionRequest provisionRequest() {
-        return new VpnProvisionRequest(SUBSCRIPTION_ID, 123L, EXPIRY);
+        return new VpnProvisionRequest(SUBSCRIPTION_ID, 123L, EXPIRY,
+                SUBSCRIPTION_ID.toString());
     }
 
     private ThreeXUiInboundResponse inbound() {

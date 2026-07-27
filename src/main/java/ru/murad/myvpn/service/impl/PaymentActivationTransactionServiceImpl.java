@@ -89,7 +89,7 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
             }
             PaymentActivationAction action = active == null ? PaymentActivationAction.PROVISION : PaymentActivationAction.EXTEND;
             Instant target = order.getActivationTargetExpiresAt();
-            if (target == null) {
+            if (target == null && (active != null || !"3X_UI".equals(vpnProvider.providerName()))) {
                 Instant base = active == null || active.getExpiresAt().isBefore(now) ? now : active.getExpiresAt();
                 target = plus(base, java.time.Duration.ofDays(order.getDurationDaysSnapshot()), "Activation target");
                 order.fixActivationTargetExpiresAt(token, generation, target, now);
@@ -115,6 +115,26 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
             marked++;
         }
         return marked;
+    }
+
+    @Override @Transactional
+    public Optional<PreparedPaymentActivation> fixProvisionTarget(
+            PreparedPaymentActivation prepared,
+            Instant target,
+            Instant now
+    ) {
+        if (prepared == null || prepared.action() != PaymentActivationAction.PROVISION
+                || prepared.targetExpiresAt() != null || target == null) {
+            throw new PaymentOrderValidationException("Invalid provision target command");
+        }
+        PaymentOrder order = orders.findByIdForUpdate(prepared.paymentOrderId())
+                .orElseThrow(PaymentNotFoundException::new);
+        if (!matchesWithoutTarget(order, prepared)
+                || order.getActivationTargetExpiresAt() != null) {
+            return Optional.empty();
+        }
+        order.fixActivationTargetExpiresAt(prepared.token(), prepared.generation(), target, now);
+        return Optional.of(prepared.withTargetExpiresAt(target));
     }
 
     @Override @Transactional
@@ -189,11 +209,14 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
     }
 
     private boolean matches(PaymentOrder o, PreparedPaymentActivation p) {
+        return matchesWithoutTarget(o, p)
+                && Objects.equals(o.getActivationTargetExpiresAt(), p.targetExpiresAt());
+    }
+    private boolean matchesWithoutTarget(PaymentOrder o, PreparedPaymentActivation p) {
         return o.getId().equals(p.paymentOrderId()) && o.getUser().getId().equals(p.userId())
                 && o.getStatus() == p.paymentStatus() && o.getProvider() == p.provider()
                 && o.getActivationStatus() == p.activationStatus() && o.getActivationGeneration() == p.generation()
                 && Objects.equals(o.getActivationClaimToken(), p.token()) && o.getActivationStatus() == PaymentActivationStatus.PROCESSING
-                && Objects.equals(o.getActivationTargetExpiresAt(), p.targetExpiresAt())
                 && Objects.equals(o.getDurationDaysSnapshot(), p.durationDays())
                 && Objects.equals(o.getTariff().getId(), p.tariffId())
                 && Objects.equals(o.getTariffCodeSnapshot(), p.tariffCodeSnapshot())

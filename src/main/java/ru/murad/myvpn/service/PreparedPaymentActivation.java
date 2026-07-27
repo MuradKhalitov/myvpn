@@ -32,4 +32,13 @@ public record PreparedPaymentActivation(UUID paymentOrderId, UUID userId,
     }
 
     @Override public String toString() { return "PreparedPaymentActivation[redacted]"; }
+
+    public PreparedPaymentActivation withTargetExpiresAt(Instant target) {
+        return new PreparedPaymentActivation(paymentOrderId, userId, provider, action, generation, token,
+                durationDays, target, existingSubscriptionId, existingVpnAccessId,
+                stableExternalClientId, existingSubscriptionVersion, existingSubscriptionExpiresAt,
+                paymentStatus, activationStatus, tariffId, tariffCodeSnapshot, tariffNameSnapshot,
+                vpnProviderName, existingVpnAccessVersion, existingVpnAccessStatus,
+                existingVpnProviderName);
+    }
 }
