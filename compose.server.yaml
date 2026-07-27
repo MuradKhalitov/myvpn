@@ -28,7 +28,8 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
       DB_USERNAME: ${POSTGRES_USER:?POSTGRES_USER is required}
       DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      JAVA_OPTS: -XX:InitialRAMPercentage=25.0 -XX:MaxRAMPercentage=75.0
+      JAVA_OPTS: -Duser.timezone=UTC -XX:InitialRAMPercentage=25.0 -XX:MaxRAMPercentage=75.0
+      TZ: UTC
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?TELEGRAM_BOT_TOKEN is required}
       TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS:?TELEGRAM_ADMIN_IDS is required}
       PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:?PAYMENT_PROVIDER is required}

@@ -96,6 +96,20 @@ public class VpnDeliveryServiceImpl implements VpnDeliveryService {
                 || !fingerprint(access.getConfigurationData()).equals(claim.configurationFingerprint())
                 || !sub.getExpiresAt().isAfter(clock.instant()) || access.getConfigurationData() == null || access.getConfigurationData().isBlank()) return Optional.empty();
         String date = DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneOffset.UTC).format(sub.getExpiresAt());
+        if (claim.type() == VpnDeliveryType.ACTIVATION_PROVISION) {
+            String text = "VPN активирован.\n\nТариф: " + claim.tariffName()
+                    + "\nДействует до: " + date + "\n\nКонфигурация:\n"
+                    + access.getConfigurationData()
+                    + "\n\nНикому не пересылайте эту конфигурацию.";
+            if (text.length() > TELEGRAM_TEXT_LIMIT) throw new VpnDeliveryMessageTooLongException();
+            return Optional.of(new VpnDeliveryMessage(claim.telegramId(), text, sub.getExpiresAt()));
+        }
+        if (claim.type() == VpnDeliveryType.ACTIVATION_EXTEND) {
+            String text = "VPN продлён.\n\nНовый срок действия: " + date
+                    + "\n\nТекущая конфигурация:\n" + access.getConfigurationData();
+            if (text.length() > TELEGRAM_TEXT_LIMIT) throw new VpnDeliveryMessageTooLongException();
+            return Optional.of(new VpnDeliveryMessage(claim.telegramId(), text, sub.getExpiresAt()));
+        }
         String text = claim.type() == VpnDeliveryType.ACTIVATION_PROVISION
                 ? "VPN активирован.\n\nТариф: " + claim.tariffName() + "\nДействует до: " + date + "\n\nКонфигурация:\n" + access.getConfigurationData() + "\n\nНикому не пересылайте эту конфигурацию."
                 : "VPN продлён.\n\nНовый срок действия: " + date + "\n\nТекущая конфигурация:\n" + access.getConfigurationData();

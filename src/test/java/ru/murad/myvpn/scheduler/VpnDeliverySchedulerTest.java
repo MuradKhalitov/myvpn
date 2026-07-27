@@ -6,6 +6,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.transaction.annotation.Transactional;
 import ru.murad.myvpn.config.VpnDeliveryProperties;
 import ru.murad.myvpn.service.VpnDeliveryService;
+import ru.murad.myvpn.service.VpnDeliveryWorkerResult;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,6 +21,8 @@ class VpnDeliverySchedulerTest {
         assertThat(method.getAnnotation(Scheduled.class)).isNotNull();
         assertThat(method.getAnnotation(Transactional.class)).isNull();
         VpnDeliveryService service = mock(VpnDeliveryService.class);
+        when(service.processPendingDeliveries(7))
+                .thenReturn(new VpnDeliveryWorkerResult(0, 0, 0, 0, 0, 0, 0));
         new VpnDeliveryScheduler(service, new VpnDeliveryProperties(true, 7, Duration.ofSeconds(5), Duration.ofMinutes(2), 5, Duration.ofSeconds(5), Duration.ofMinutes(5))).process();
         verify(service).processPendingDeliveries(7);
     }

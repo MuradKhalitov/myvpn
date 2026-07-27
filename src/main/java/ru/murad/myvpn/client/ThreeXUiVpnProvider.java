@@ -2,6 +2,7 @@ package ru.murad.myvpn.client;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import lombok.extern.slf4j.Slf4j;
+import io.micrometer.core.instrument.Metrics;
 import org.springframework.stereotype.Component;
 import ru.murad.myvpn.client.threexui.ThreeXUiClientRequest;
 import ru.murad.myvpn.client.threexui.ThreeXUiInboundResponse;
@@ -226,6 +227,8 @@ public class ThreeXUiVpnProvider implements VpnProvider {
     }
 
     private ProvisionedVpnAccess extensionResult(ThreeXUiVlessClient client) {
+        Metrics.counter("vpn_provider_operation_total", "provider", "3x_ui", "operation", "extend", "result", "success")
+                .increment();
         return new ProvisionedVpnAccess(PROVIDER_NAME, client.id(), null,
                 java.time.Instant.ofEpochMilli(client.expiryTime()));
     }
@@ -361,6 +364,8 @@ public class ThreeXUiVpnProvider implements VpnProvider {
             if (configuration == null || configuration.isBlank()) {
                 throw new ThreeXUiException("Incomplete VLESS configuration");
             }
+            Metrics.counter("vpn_provider_operation_total", "provider", "3x_ui", "operation", "provision", "result", "success")
+                    .increment();
             return new ProvisionedVpnAccess(
                     PROVIDER_NAME, client.id(), configuration,
                     java.time.Instant.ofEpochMilli(client.expiryTime()));

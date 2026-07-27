@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import ru.murad.myvpn.config.PaymentProperties;
 import ru.murad.myvpn.model.PaymentProviderType;
 import ru.murad.myvpn.service.PaymentActivationService;
+import ru.murad.myvpn.service.PaymentActivationWorkerResult;
 import java.net.URI;
 import java.time.Duration;
 import static org.mockito.Mockito.*;
@@ -19,6 +20,8 @@ class PaymentActivationSchedulerTest {
 
     @Test
     void enabledFlagInvokesWorkerWithConfiguredBatchSize() {
+        when(worker.processPendingActivations(7))
+                .thenReturn(new PaymentActivationWorkerResult(0, 0, 0, 0, 0, 0, 0));
         new PaymentActivationScheduler(worker, properties(true)).process();
         verify(worker).processPendingActivations(7);
     }

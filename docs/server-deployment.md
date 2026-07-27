@@ -113,13 +113,36 @@ To roll back, restore the previous immutable `MYVPN_IMAGE` commit tag in `.env.s
 
 ## PostgreSQL backup and restore
 
-Stop the application before a restore. Store compressed logical backups outside the repository with restricted permissions:
+Never restore into the current staging or production database. Backups are not repository artifacts and must remain readable only by the deployment account.
 
 ```bash
-docker compose -f compose.server.yaml exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" | gzip > myvpn-postgres-$(date +%F).sql.gz
+umask 077
+mkdir -p /opt/myvpn/backups
+stamp=$(date -u +%Y%m%dT%H%M%SZ)
+tmp=/opt/myvpn/backups/.myvpn-${stamp}.dump.tmp
+final=/opt/myvpn/backups/myvpn-${stamp}.dump
+
+docker compose --env-file .env.staging -f compose.server.yaml exec -T postgres \
+  pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc > "$tmp"
+pg_restore --list "$tmp" >/dev/null
+mv "$tmp" "$final"
+
+# Retain only backups older than 30 days; inspect this path before changing it.
+find /opt/myvpn/backups -maxdepth 1 -type f -name 'myvpn-*.dump' -mtime +30 -delete
 ```
 
-Restore into a fresh target database or explicitly approve overwriting the existing database, using `psql` inside the PostgreSQL container. Test restores outside production before relying on them. Do not place passwords in command history.
+Verify recovery only in a separate test database/container, for example with `pg_restore --list` followed by `pg_restore -d myvpn_restore_test backup.dump`. Do not put passwords on command lines or in logs. Keep encrypted off-host copies and test restores regularly.
+
+## Production hardening notes
+
+- Keep `.env.staging` and `.env.server` owner-readable only: `chmod 600 .env.staging` and `chown myvpn-deploy:myvpn-deploy .env.staging`.
+- The app runs as non-root with a read-only root filesystem; Compose does not publish PostgreSQL, Spring Boot, or Actuator ports.
+- Images exclude `.env*`; never copy secrets through build arguments.
+- The app uses UTC (`TZ=UTC`, `-Duser.timezone=UTC`). HikariCP is deliberately small for the 512 MB single-instance VPS: maximum 5, minimum idle 1, 5s connection timeout, 3s validation timeout, 5m idle timeout, 25m max lifetime.
+
+### VLESS client UUID rotation
+
+If a real VLESS client UUID is exposed, create and assign a new UUID in the configured 3x-ui inbound, generate the replacement configuration, and deliver it to the verified user through the normal secure channel. Confirm that the old UUID no longer works before closing the incident. Do not log either configuration, UUID, cookie, password, or URI.
 
 ## Stop
 
