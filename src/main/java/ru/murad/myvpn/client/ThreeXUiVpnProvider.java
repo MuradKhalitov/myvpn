@@ -1,6 +1,7 @@
 package ru.murad.myvpn.client;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import ru.murad.myvpn.client.threexui.ThreeXUiClientRequest;
 import ru.murad.myvpn.client.threexui.ThreeXUiInboundResponse;
@@ -12,12 +13,14 @@ import ru.murad.myvpn.exception.ThreeXUiNotFoundException;
 import ru.murad.myvpn.exception.ThreeXUiRetryableException;
 import ru.murad.myvpn.exception.ThreeXUiUncertainException;
 import ru.murad.myvpn.exception.ThreeXUiLastClientException;
+import ru.murad.myvpn.exception.VpnProviderFailureCode;
 
 import java.util.List;
 import java.util.Optional;
 
 @Component
 @ConditionalOnProperty(name = "vpn.provider.type", havingValue = "3x-ui")
+@Slf4j
 public class ThreeXUiVpnProvider implements VpnProvider {
 
     private static final String PROVIDER_NAME = "3X_UI";
@@ -51,24 +54,57 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                 new ThreeXUiRequestBudget(properties.maxRequestsPerOperation());
         String clientUuid = request.stableExternalAccessId() == null
                 ? request.subscriptionId().toString() : request.stableExternalAccessId();
+        long expectedExpiry = request.expiresAt().toEpochMilli();
         ThreeXUiVlessClient client = ThreeXUiVlessClient.create(
-                clientUuid, EMAIL_PREFIX + clientUuid, request.expiresAt().toEpochMilli());
+                clientUuid, EMAIL_PREFIX + clientUuid, expectedExpiry);
+        boolean reconciliationStarted = false;
         for (int attempt = 1; attempt <= properties.maxMutationAttempts(); attempt++) {
             boolean mutationAttempted = false;
+            boolean reconciliationAttempted = false;
+            ThreeXUiInboundResponse before = null;
             try {
                 ThreeXUiInboundResponse inbound = inboundClient.getInbound(budget);
-                Optional<ThreeXUiVlessClient> existing = findClient(inbound, clientUuid);
+                validateConfiguredInbound(inbound);
+                Optional<ThreeXUiVlessClient> existing = findProvisioningClient(inbound, clientUuid);
                 if (existing.isPresent()) {
-                    return result(inbound, existing.get());
+                    if (matchesProvisionedState(existing.get(), expectedExpiry)) {
+                        log.info("3x-ui provision operation=reuse expiryChanged=false");
+                        return result(inbound, existing.get());
+                    }
+                    mutationAttempted = true;
+                    reconciliationAttempted = true;
+                    reconciliationStarted = true;
+                    before = inbound;
+                    budget.reserveReconciliation();
+                    inboundClient.updateClient(
+                            clientUuid,
+                            inboundClient.prepareProvisionReconciliationRequest(
+                                    inbound, clientUuid, expectedExpiry),
+                            budget);
+                    ThreeXUiInboundResponse confirmed =
+                            inboundClient.getInboundForReconciliation(budget);
+                    validateConfiguredInbound(confirmed);
+                    Optional<ThreeXUiVlessClient> confirmedClient =
+                            findProvisioningClient(confirmed, clientUuid);
+                    if (confirmedClient.isPresent()
+                            && matchesProvisionedState(confirmedClient.get(), expectedExpiry)
+                            && inboundClient.otherClientsUnchanged(before, confirmed, clientUuid)) {
+                        log.info("3x-ui provision operation=reconcile expiryChanged=true");
+                        return result(confirmed, confirmedClient.get());
+                    }
+                    continue;
                 }
                 mutationAttempted = true;
                 budget.reserveReconciliation();
                 inboundClient.addClient(request(client), budget);
                 ThreeXUiInboundResponse confirmed =
                         inboundClient.getInboundForReconciliation(budget);
+                validateConfiguredInbound(confirmed);
                 Optional<ThreeXUiVlessClient> confirmedClient =
-                        findClient(confirmed, clientUuid);
-                if (confirmedClient.isPresent()) {
+                        findProvisioningClient(confirmed, clientUuid);
+                if (confirmedClient.isPresent()
+                        && matchesProvisionedState(confirmedClient.get(), expectedExpiry)) {
+                    log.info("3x-ui provision operation=create expiryChanged=true");
                     return result(confirmed, confirmedClient.get());
                 }
             } catch (ThreeXUiRetryableException exception) {
@@ -76,9 +112,16 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                     try {
                         ThreeXUiInboundResponse recovered =
                                 inboundClient.getInboundForReconciliation(budget);
+                        validateConfiguredInbound(recovered);
                         Optional<ThreeXUiVlessClient> recoveredClient =
-                                findClient(recovered, clientUuid);
-                        if (recoveredClient.isPresent()) {
+                                findProvisioningClient(recovered, clientUuid);
+                        boolean otherClientsPreserved = !reconciliationAttempted
+                                || inboundClient.otherClientsUnchanged(before, recovered, clientUuid);
+                        if (recoveredClient.isPresent()
+                                && matchesProvisionedState(recoveredClient.get(), expectedExpiry)
+                                && otherClientsPreserved) {
+                            log.info("3x-ui provision operation={} expiryChanged=true",
+                                    reconciliationAttempted ? "reconcile" : "create");
                             return result(recovered, recoveredClient.get());
                         }
                     } catch (ThreeXUiRetryableException ignored) {
@@ -94,6 +137,10 @@ public class ThreeXUiVpnProvider implements VpnProvider {
             if (attempt < properties.maxMutationAttempts()) {
                 inboundClient.pause(attempt);
             }
+        }
+        log.warn("3x-ui provision operation=reconcile expiryChanged=true stateConfirmed=false");
+        if (reconciliationStarted) {
+            throw new ThreeXUiUncertainException();
         }
         throw new ThreeXUiException("3x-ui client creation was not confirmed");
     }
@@ -243,6 +290,34 @@ public class ThreeXUiVpnProvider implements VpnProvider {
         return inboundClient.parseSettings(inbound).clients().stream()
                 .filter(client -> clientUuid.equals(client.id()))
                 .findFirst();
+    }
+
+    private Optional<ThreeXUiVlessClient> findProvisioningClient(
+            ThreeXUiInboundResponse inbound,
+            String clientUuid
+    ) {
+        List<ThreeXUiVlessClient> matches = inboundClient.parseSettings(inbound).clients().stream()
+                .filter(client -> clientUuid.equals(client.id()))
+                .toList();
+        if (matches.size() > 1) {
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "3x-ui returned ambiguous client identity");
+        }
+        return matches.stream().findFirst();
+    }
+
+    private boolean matchesProvisionedState(ThreeXUiVlessClient client, long expectedExpiry) {
+        return client.expiryTime() != null
+                && client.expiryTime() == expectedExpiry
+                && Boolean.TRUE.equals(client.enable());
+    }
+
+    private void validateConfiguredInbound(ThreeXUiInboundResponse inbound) {
+        if (inbound.id() != properties.inboundId()
+                || !"vless".equalsIgnoreCase(inbound.protocol())) {
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "3x-ui returned an unexpected configured inbound");
+        }
     }
 
     private ProvisionedVpnAccess result(

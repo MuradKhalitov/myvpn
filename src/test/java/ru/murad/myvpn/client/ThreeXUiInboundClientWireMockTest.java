@@ -242,6 +242,28 @@ class ThreeXUiInboundClientWireMockTest {
     }
 
     @Test
+    void provisionReconciliationRequestUpdatesOnlyTargetClient() throws Exception {
+        String settings = """
+                {"clients":[
+                  {"id":"target-client","email":"target","enable":false,"expiryTime":1000},
+                  {"id":"other-client","email":"other","enable":true,"expiryTime":2000}
+                ]}
+                """;
+        var request = client.prepareProvisionReconciliationRequest(
+                new ru.murad.myvpn.client.threexui.ThreeXUiInboundResponse(
+                        42, 443, "vless", settings, "stream"),
+                "target-client", 3000L);
+
+        JsonNode clients = new ObjectMapper().readTree(request.settings()).path("clients");
+        assertThat(request.id()).isEqualTo(42);
+        assertThat(clients).hasSize(1);
+        assertThat(clients.get(0).path("id").asText()).isEqualTo("target-client");
+        assertThat(clients.get(0).path("expiryTime").asLong()).isEqualTo(3000L);
+        assertThat(clients.get(0).path("enable").asBoolean()).isTrue();
+        assertThat(request.settings()).doesNotContain("other-client");
+    }
+
+    @Test
     void shouldRejectUnsupportedProtocol() {
         stubLogin(COOKIE);
         server.stubFor(get(urlEqualTo(inboundPath()))

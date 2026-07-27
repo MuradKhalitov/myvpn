@@ -104,6 +104,23 @@ public class ThreeXUiInboundClient {
             String clientUuid,
             long expiryTime
     ) {
+        return prepareClientUpdateRequest(inbound, clientUuid, expiryTime, false);
+    }
+
+    public ThreeXUiClientRequest prepareProvisionReconciliationRequest(
+            ThreeXUiInboundResponse inbound,
+            String clientUuid,
+            long expiryTime
+    ) {
+        return prepareClientUpdateRequest(inbound, clientUuid, expiryTime, true);
+    }
+
+    private ThreeXUiClientRequest prepareClientUpdateRequest(
+            ThreeXUiInboundResponse inbound,
+            String clientUuid,
+            long expiryTime,
+            boolean enableClient
+    ) {
         try {
             JsonNode settings = objectMapper.readTree(inbound.settings());
             JsonNode clients = settings == null ? null : settings.get("clients");
@@ -123,6 +140,9 @@ public class ThreeXUiInboundClient {
                 throw new ThreeXUiNotFoundException("extend client");
             }
             target.put("expiryTime", expiryTime);
+            if (enableClient) {
+                target.put("enable", true);
+            }
             ObjectNode updateSettings = objectMapper.createObjectNode();
             updateSettings.set("clients", objectMapper.createArrayNode().add(target));
             return new ThreeXUiClientRequest(

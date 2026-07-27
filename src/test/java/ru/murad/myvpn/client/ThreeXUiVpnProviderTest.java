@@ -13,6 +13,7 @@ import ru.murad.myvpn.client.threexui.ThreeXUiVlessClient;
 import ru.murad.myvpn.config.ThreeXUiProperties;
 import ru.murad.myvpn.exception.ThreeXUiException;
 import ru.murad.myvpn.exception.ThreeXUiRetryableException;
+import ru.murad.myvpn.exception.ThreeXUiUncertainException;
 
 import java.net.URI;
 import java.time.Duration;
@@ -55,7 +56,7 @@ class ThreeXUiVpnProviderTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(10),
                 3,
-                8,
+                16,
                 Duration.ZERO,
                 Duration.ZERO);
         provider = new ThreeXUiVpnProvider(
@@ -76,6 +77,7 @@ class ThreeXUiVpnProviderTest {
         assertThat(result.externalAccessId()).isEqualTo(SUBSCRIPTION_ID.toString());
         assertThat(result.configurationData()).isEqualTo("vless://generated");
         verify(inboundClient, never()).addClient(any(), any());
+        verify(inboundClient, never()).updateClient(any(), any(), any());
     }
 
     @Test
@@ -99,6 +101,98 @@ class ThreeXUiVpnProviderTest {
         verify(inboundClient).addClient(captor.capture(), any());
         assertThat(captor.getValue().id()).isEqualTo(42);
         assertThat(captor.getValue().settings()).isEqualTo("serialized-settings");
+    }
+
+    @Test
+    void shouldReconcileExistingClientWithStaleExpiryWithoutCreatingDuplicate() {
+        ThreeXUiInboundResponse before = inbound("before");
+        ThreeXUiInboundResponse after = inbound("after");
+        ThreeXUiVlessClient stale = client(EXPIRY.minusSeconds(3600).toEpochMilli());
+        ThreeXUiVlessClient reconciled = stale.withExpiryTime(EXPIRY.toEpochMilli());
+        ThreeXUiClientRequest updateRequest =
+                new ThreeXUiClientRequest(42, "reconcile-settings");
+        when(inboundClient.getInbound(any())).thenReturn(before);
+        when(inboundClient.getInboundForReconciliation(any())).thenReturn(after);
+        when(inboundClient.parseSettings(before))
+                .thenReturn(new ThreeXUiInboundSettings(List.of(stale)));
+        when(inboundClient.parseSettings(after))
+                .thenReturn(new ThreeXUiInboundSettings(List.of(reconciled)));
+        when(inboundClient.prepareProvisionReconciliationRequest(
+                before, SUBSCRIPTION_ID.toString(), EXPIRY.toEpochMilli()))
+                .thenReturn(updateRequest);
+        when(inboundClient.otherClientsUnchanged(
+                before, after, SUBSCRIPTION_ID.toString())).thenReturn(true);
+        stubConfiguration(after);
+
+        ProvisionedVpnAccess result = provider.provision(provisionRequest());
+
+        assertThat(result.targetExpiresAt()).isEqualTo(EXPIRY);
+        verify(inboundClient).updateClient(
+                org.mockito.ArgumentMatchers.eq(SUBSCRIPTION_ID.toString()),
+                org.mockito.ArgumentMatchers.eq(updateRequest),
+                org.mockito.ArgumentMatchers.any());
+        verify(inboundClient, never()).addClient(any(), any());
+    }
+
+    @Test
+    void repeatedProvisionWithConfirmedStateIsIdempotent() {
+        ThreeXUiInboundResponse inbound = inbound("confirmed");
+        ThreeXUiVlessClient confirmed = client(EXPIRY.toEpochMilli());
+        when(inboundClient.getInbound(any())).thenReturn(inbound);
+        when(inboundClient.parseSettings(inbound))
+                .thenReturn(new ThreeXUiInboundSettings(List.of(confirmed)));
+        stubConfiguration(inbound);
+
+        provider.provision(provisionRequest());
+        provider.provision(provisionRequest());
+
+        verify(inboundClient, never()).addClient(any(), any());
+        verify(inboundClient, never()).updateClient(any(), any(), any());
+    }
+
+    @Test
+    void provisionUpdateTimeoutWithStaleReconciliationIsUncertain() {
+        ThreeXUiInboundResponse staleInbound = inbound("stale");
+        ThreeXUiVlessClient stale = client(EXPIRY.minusSeconds(3600).toEpochMilli());
+        when(inboundClient.getInbound(any())).thenReturn(staleInbound);
+        when(inboundClient.getInboundForReconciliation(any())).thenReturn(staleInbound);
+        when(inboundClient.parseSettings(staleInbound))
+                .thenReturn(new ThreeXUiInboundSettings(List.of(stale)));
+        when(inboundClient.prepareProvisionReconciliationRequest(
+                staleInbound, SUBSCRIPTION_ID.toString(), EXPIRY.toEpochMilli()))
+                .thenReturn(new ThreeXUiClientRequest(42, "reconcile-settings"));
+        doThrow(new ThreeXUiRetryableException("temporary"))
+                .when(inboundClient).updateClient(any(), any(), any());
+
+        assertThatThrownBy(() -> provider.provision(provisionRequest()))
+                .isInstanceOf(ThreeXUiUncertainException.class);
+
+        verify(inboundClient, times(3)).updateClient(any(), any(), any());
+        verify(inboundClient, never()).addClient(any(), any());
+    }
+
+    @Test
+    void shouldRejectReconciliationThatChangesAnotherClient() {
+        ThreeXUiInboundResponse before = inbound("before");
+        ThreeXUiInboundResponse after = inbound("after");
+        ThreeXUiVlessClient stale = client(EXPIRY.minusSeconds(3600).toEpochMilli());
+        ThreeXUiVlessClient reconciled = stale.withExpiryTime(EXPIRY.toEpochMilli());
+        when(inboundClient.getInbound(any())).thenReturn(before);
+        when(inboundClient.getInboundForReconciliation(any())).thenReturn(after);
+        when(inboundClient.parseSettings(before))
+                .thenReturn(new ThreeXUiInboundSettings(List.of(stale)));
+        when(inboundClient.parseSettings(after))
+                .thenReturn(new ThreeXUiInboundSettings(List.of(reconciled)));
+        when(inboundClient.prepareProvisionReconciliationRequest(
+                before, SUBSCRIPTION_ID.toString(), EXPIRY.toEpochMilli()))
+                .thenReturn(new ThreeXUiClientRequest(42, "reconcile-settings"));
+        when(inboundClient.otherClientsUnchanged(
+                before, after, SUBSCRIPTION_ID.toString())).thenReturn(false);
+
+        assertThatThrownBy(() -> provider.provision(provisionRequest()))
+                .isInstanceOf(ThreeXUiUncertainException.class);
+
+        verify(inboundClient, never()).addClient(any(), any());
     }
 
     @Test
