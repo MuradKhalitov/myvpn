@@ -50,6 +50,12 @@ public class CreatedPaymentValidator {
         try {
             if (provider == PaymentProviderType.FAKE) {
                 PaymentConfirmationUrl.fake(payment.confirmationUrl());
+            } else if (provider == PaymentProviderType.YOOKASSA) {
+                if (!"https".equalsIgnoreCase(payment.confirmationUrl().getScheme())
+                        || payment.confirmationUrl().getHost() == null
+                        || payment.confirmationUrl().getHost().isBlank()) {
+                    throw uncertain();
+                }
             } else {
                 throw uncertain();
             }

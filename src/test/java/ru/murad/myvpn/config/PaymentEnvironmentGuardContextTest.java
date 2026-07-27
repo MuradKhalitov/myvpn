@@ -92,7 +92,7 @@ class PaymentEnvironmentGuardContextTest {
                         "vpn.provider.allow-fake=false")
                 .run(context -> {
                     assertThat(context).hasFailed();
-                    assertStartupFailure(context, "Required VPN provider setting");
+                    assertStartupFailure(context, "vpn.three-x-ui.base-url");
                 });
     }
 

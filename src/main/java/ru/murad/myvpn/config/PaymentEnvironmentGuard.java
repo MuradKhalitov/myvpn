@@ -24,6 +24,9 @@ public class PaymentEnvironmentGuard {
                 && properties.provider() == PaymentProviderType.FAKE) {
             throw new IllegalStateException("Fake payment provider is forbidden in production");
         }
+        if (environment.acceptsProfiles(Profiles.of("prod"))) {
+            require(environment, "telegram.bot-token");
+        }
         boolean activationEnabled = environment.getProperty("payment.activation.enabled", Boolean.class, false);
         String vpnProvider = environment.getProperty("vpn.provider.type", "fake");
         boolean allowFakeVpn = environment.getProperty("vpn.provider.allow-fake", Boolean.class, false);
@@ -37,7 +40,8 @@ public class PaymentEnvironmentGuard {
         if (activationEnabled && "fake".equalsIgnoreCase(vpnProvider) && !allowFakeVpn) {
             throw new IllegalStateException("Fake VPN provider is disabled when payment activation is enabled");
         }
-        if (activationEnabled && "3x-ui".equalsIgnoreCase(vpnProvider)) {
+        if ((activationEnabled || environment.acceptsProfiles(Profiles.of("prod")))
+                && "3x-ui".equalsIgnoreCase(vpnProvider)) {
             require(environment, "vpn.three-x-ui.base-url");
             require(environment, "vpn.three-x-ui.web-base-path");
             require(environment, "vpn.three-x-ui.username");
@@ -46,10 +50,16 @@ public class PaymentEnvironmentGuard {
             if (environment.getProperty("vpn.three-x-ui.inbound-id", Integer.class, 0) <= 0)
                 throw new IllegalStateException("3x-ui inbound id is required when payment activation is enabled");
         }
+        if (environment.acceptsProfiles(Profiles.of("prod"))
+                && properties.provider() == PaymentProviderType.YOOKASSA) {
+            require(environment, "payment.yookassa.shop-id");
+            require(environment, "payment.yookassa.secret-key");
+            require(environment, "payment.yookassa.return-url");
+        }
     }
 
     private void require(Environment environment, String key) {
         if (environment.getProperty(key, String.class, "").isBlank())
-            throw new IllegalStateException("Required VPN provider setting is missing");
+            throw new IllegalStateException("Required setting is missing: " + key);
     }
 }

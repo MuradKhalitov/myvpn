@@ -3,6 +3,10 @@ payment:
   allow-fake: ${PAYMENT_ALLOW_FAKE:false}
   activation:
     enabled: ${PAYMENT_ACTIVATION_ENABLED:true}
+  yookassa:
+    shop-id: ${YOOKASSA_SHOP_ID:?YOOKASSA_SHOP_ID is required when YOOKASSA is selected}
+    secret-key: ${YOOKASSA_SECRET_KEY:?YOOKASSA_SECRET_KEY is required when YOOKASSA is selected}
+    return-url: ${YOOKASSA_RETURN_URL:?YOOKASSA_RETURN_URL is required when YOOKASSA is selected}
 
 spring:
   datasource:

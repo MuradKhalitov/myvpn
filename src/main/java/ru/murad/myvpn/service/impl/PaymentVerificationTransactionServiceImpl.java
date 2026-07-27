@@ -50,6 +50,25 @@ public class PaymentVerificationTransactionServiceImpl implements PaymentVerific
     }
 
     @Override @Transactional
+    public PaymentVerificationPreparation prepareByProviderPaymentId(String providerPaymentId, Instant now) {
+        if (providerPaymentId == null || providerPaymentId.isBlank()) {
+            return new PaymentVerificationPreparation(null,
+                    new PaymentVerificationResult(PaymentVerificationOutcome.NOT_FOUND, null, null, null, null));
+        }
+        PaymentOrder found = orders.findByProviderAndProviderPaymentId(PaymentProviderType.YOOKASSA, providerPaymentId)
+                .orElse(null);
+        if (found == null) {
+            return new PaymentVerificationPreparation(null,
+                    new PaymentVerificationResult(PaymentVerificationOutcome.NOT_FOUND, null, null, null, null));
+        }
+        entityManager.clear();
+        PaymentOrder order = orders.findByIdForUpdate(found.getId()).orElseThrow(PaymentNotFoundException::new);
+        PaymentVerificationResult immediate = immediate(order, now, Duration.ZERO);
+        if (immediate != null) return new PaymentVerificationPreparation(null, immediate);
+        return new PaymentVerificationPreparation(snapshot(order), null);
+    }
+
+    @Override @Transactional
     public PaymentVerificationResult apply(PreparedPaymentVerification expected, ProviderPayment actual, Instant now) {
         PaymentOrder order = orders.findByIdForUpdate(expected.paymentOrderId()).orElseThrow(PaymentNotFoundException::new);
         if (!snapshotMatches(order, expected) || actual == null
@@ -80,6 +99,17 @@ public class PaymentVerificationTransactionServiceImpl implements PaymentVerific
             return result(order, PaymentVerificationOutcome.MANUAL_REVIEW_REQUIRED);
         }
         return result(order, PaymentVerificationOutcome.PROVIDER_RESULT_UNCERTAIN);
+    }
+
+    @Override @Transactional
+    public PaymentVerificationResult retryLater(PreparedPaymentVerification expected, Duration delay, Instant now) {
+        PaymentOrder order = orders.findByIdForUpdate(expected.paymentOrderId()).orElseThrow(PaymentNotFoundException::new);
+        if (!snapshotMatches(order, expected)) return result(order, PaymentVerificationOutcome.PROVIDER_RESULT_UNCERTAIN);
+        if (order.getStatus() == PaymentStatus.PENDING || order.getStatus() == PaymentStatus.CREATING) {
+            order.scheduleVerificationRetry(now, delay);
+            orders.saveAndFlush(order);
+        }
+        return result(order, PaymentVerificationOutcome.PROVIDER_UNAVAILABLE);
     }
 
     private boolean blocking(PaymentOrder p) { return p.getStatus() == PaymentStatus.PENDING || p.getStatus() == PaymentStatus.CREATING || p.getStatus() == PaymentStatus.MANUAL_REVIEW_REQUIRED; }

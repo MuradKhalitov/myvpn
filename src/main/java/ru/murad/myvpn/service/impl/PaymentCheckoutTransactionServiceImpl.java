@@ -179,6 +179,11 @@ public class PaymentCheckoutTransactionServiceImpl
             PaymentConfirmationUrl.fake(url);
             return;
         }
+        if (provider == PaymentProviderType.YOOKASSA
+                && "https".equalsIgnoreCase(url.getScheme())
+                && url.getHost() != null && !url.getHost().isBlank()) {
+            return;
+        }
         throw new PaymentProviderUncertainException(
                 "Payment confirmation validator is not configured");
     }

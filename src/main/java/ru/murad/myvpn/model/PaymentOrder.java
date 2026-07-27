@@ -328,6 +328,18 @@ public class PaymentOrder {
         return true;
     }
 
+    public void scheduleVerificationRetry(Instant now, Duration delay) {
+        Objects.requireNonNull(now, "now");
+        if (delay == null || delay.isNegative()) {
+            throw new PaymentOrderValidationException("Verification retry delay is invalid");
+        }
+        if (status != PaymentStatus.PENDING && status != PaymentStatus.CREATING) {
+            throw new PaymentStateTransitionException("Verification retry is not allowed");
+        }
+        nextVerificationAt = now.plus(delay).truncatedTo(ChronoUnit.MICROS);
+        updatedAt = now.truncatedTo(ChronoUnit.MICROS);
+    }
+
     /**
      * Claims activation and returns the new fencing generation. A worker must
      * retain both the supplied token and returned generation for every fenced

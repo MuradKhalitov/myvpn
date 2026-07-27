@@ -120,9 +120,8 @@ public class FakePaymentProvider implements PaymentProvider {
         if (amount.signum() <= 0 || !"RUB".equals(command.currency())) {
             throw new PaymentProviderPermanentException("Payment amount is invalid");
         }
-        if (command.metadata() == null
-                || !command.metadata().equals(Map.of(
-                        ORDER_METADATA_KEY, command.paymentOrderId().toString()))) {
+        if (command.metadata() == null || !command.paymentOrderId().toString()
+                .equals(command.metadata().get(ORDER_METADATA_KEY))) {
             throw new PaymentProviderPermanentException("Payment metadata is invalid");
         }
     }

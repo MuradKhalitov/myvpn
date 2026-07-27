@@ -49,7 +49,7 @@ class PaymentEnvironmentGuardTest {
     void activationEnabledRejectsIncompleteThreeXUiProvider() {
         assertThatThrownBy(() -> new PaymentEnvironmentGuard(properties(), environment(true, "3x-ui", false)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("Required VPN provider setting");
+                .hasMessageContaining("vpn.three-x-ui.base-url");
     }
 
     @Test
@@ -71,7 +71,8 @@ class PaymentEnvironmentGuardTest {
 
     @Test
     void productionRejectsFakeVpnProviderEvenWhenExplicitlyAllowed() {
-        MockEnvironment environment = environment(true, "fake", true);
+        MockEnvironment environment = environment(true, "fake", true)
+                .withProperty("telegram.bot-token", "test-token");
         environment.setActiveProfiles("prod");
         PaymentProperties paymentProperties = new PaymentProperties(PaymentProviderType.YOOKASSA,
                 Duration.ofHours(1), URI.create("https://example.invalid"), false);
@@ -112,6 +113,33 @@ class PaymentEnvironmentGuardTest {
         assertThatThrownBy(() -> new PaymentEnvironmentGuard(paymentProperties, environment))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("Fake VPN provider is forbidden in production and staging");
+    }
+
+    @Test
+    void productionFailsFastWithTheMissingYooKassaPropertyName() {
+        MockEnvironment environment = configuredThreeXUiEnvironment()
+                .withProperty("telegram.bot-token", "test-token")
+                .withProperty("payment.yookassa.shop-id", "shop")
+                .withProperty("payment.yookassa.return-url", "https://bot.invalid/return");
+        environment.setActiveProfiles("prod");
+        PaymentProperties properties = new PaymentProperties(PaymentProviderType.YOOKASSA,
+                Duration.ofHours(1), URI.create("https://bot.invalid/return"), false);
+
+        assertThatThrownBy(() -> new PaymentEnvironmentGuard(properties, environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("payment.yookassa.secret-key");
+    }
+
+    @Test
+    void productionFailsFastWithTheMissingTelegramPropertyName() {
+        MockEnvironment environment = configuredThreeXUiEnvironment();
+        environment.setActiveProfiles("prod");
+        PaymentProperties properties = new PaymentProperties(PaymentProviderType.YOOKASSA,
+                Duration.ofHours(1), URI.create("https://bot.invalid/return"), false);
+
+        assertThatThrownBy(() -> new PaymentEnvironmentGuard(properties, environment))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("telegram.bot-token");
     }
 
     private MockEnvironment configuredThreeXUiEnvironment() {

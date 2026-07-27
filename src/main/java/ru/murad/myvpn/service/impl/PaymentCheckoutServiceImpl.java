@@ -108,9 +108,10 @@ public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
         return new CreatePaymentCommand(
                 prepared.orderId(), prepared.idempotenceKey(),
                 prepared.amount(), prepared.currency(),
-                "VPN subscription: " + prepared.tariffCode(),
+                "Подписка MyVPN: " + prepared.tariffName(),
                 properties.returnUrl(),
-                Map.of("payment_order_id", prepared.orderId().toString()));
+                Map.of("payment_order_id", prepared.orderId().toString(),
+                        "tariff_code", prepared.tariffCode()));
     }
 
     private PaymentCheckoutResult result(PreparedCheckout prepared) {

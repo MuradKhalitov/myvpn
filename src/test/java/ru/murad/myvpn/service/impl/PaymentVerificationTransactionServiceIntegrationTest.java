@@ -29,6 +29,7 @@ import ru.murad.myvpn.dto.PreparedPaymentVerification;
 import ru.murad.myvpn.dto.ProviderPayment;
 import ru.murad.myvpn.exception.PaymentOrderValidationException;
 import ru.murad.myvpn.exception.ProviderPaymentValidationException;
+import ru.murad.myvpn.exception.PaymentProviderRetryableException;
 import ru.murad.myvpn.client.FakePaymentProvider;
 import ru.murad.myvpn.model.PaymentActivationStatus;
 import ru.murad.myvpn.model.PaymentOrder;
@@ -71,6 +72,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doCallRealMethod;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -726,6 +728,32 @@ class PaymentVerificationTransactionServiceIntegrationTest {
             doCallRealMethod().when(fakePaymentProvider).getPayment(anyString());
             executor.shutdownNow();
         }
+    }
+
+    @Test
+    void retryableProviderResponseSchedulesPersistedCooldownThenAllowsSucceededRetry() {
+        long telegramId = 13003L;
+        user(telegramId);
+        PaymentCheckoutResult checkout = checkoutService.startCheckout(telegramId, "MONTH_1");
+        doThrow(new PaymentProviderRetryableException("rate limited", Duration.ofSeconds(10)))
+                .doCallRealMethod().when(fakePaymentProvider).getPayment(anyString());
+
+        assertThat(verificationFacade.verifyCurrentPayment(telegramId).outcome())
+                .isEqualTo(PaymentVerificationOutcome.PROVIDER_UNAVAILABLE);
+        PaymentOrder delayed = reread(checkout.paymentOrderId());
+        assertThat(delayed.getStatus()).isEqualTo(PaymentStatus.PENDING);
+        assertThat(delayed.getNextVerificationAt()).isEqualTo(NOW.plusSeconds(10));
+
+        assertThat(verificationFacade.verifyCurrentPayment(telegramId).outcome())
+                .isEqualTo(PaymentVerificationOutcome.TOO_EARLY);
+        fakePaymentProvider.markSucceeded(delayed.getProviderPaymentId());
+        jdbcTemplate.update("UPDATE payment_orders SET next_verification_at = ? WHERE id = ?",
+                Timestamp.from(NOW), delayed.getId());
+        entityManager.clear();
+
+        assertThat(verificationFacade.verifyCurrentPayment(telegramId).outcome())
+                .isEqualTo(PaymentVerificationOutcome.SUCCEEDED);
+        assertThat(reread(delayed.getId()).getStatus()).isEqualTo(PaymentStatus.SUCCEEDED);
     }
 
     @Test

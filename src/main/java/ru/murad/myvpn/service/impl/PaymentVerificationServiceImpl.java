@@ -31,10 +31,32 @@ public class PaymentVerificationServiceImpl implements PaymentVerificationServic
             actual = provider.getPayment(expected.providerPaymentId());
         } catch (PaymentNotFoundException notFound) {
             return transactions.manualReview(expected, "PROVIDER_PAYMENT_NOT_FOUND", clock.instant());
+        } catch (PaymentProviderRetryableException retryable) {
+            return transactions.retryLater(expected, retryable.retryAfter()
+                    .orElse(properties.verification().minInterval()), clock.instant());
         } catch (PaymentProviderUncertainException | PaymentProviderPermanentException ex) {
             return new PaymentVerificationResult(PaymentVerificationOutcome.PROVIDER_UNAVAILABLE, PaymentStatus.PENDING, PaymentActivationStatus.NOT_READY, null, null);
         }
         return afterProviderGet(expected, actual);
+    }
+
+    @Override
+    public PaymentVerificationResult verifyProviderPayment(String providerPaymentId) {
+        var preparation = transactions.prepareByProviderPaymentId(providerPaymentId, clock.instant());
+        if (preparation.immediateResult() != null) return preparation.immediateResult();
+        var expected = preparation.prepared();
+        try {
+            return afterProviderGet(expected, providers.resolve(expected.provider())
+                    .getPayment(expected.providerPaymentId()));
+        } catch (PaymentProviderRetryableException retryable) {
+            return transactions.retryLater(expected, retryable.retryAfter()
+                    .orElse(properties.verification().minInterval()), clock.instant());
+        } catch (PaymentNotFoundException exception) {
+            return transactions.manualReview(expected, "PROVIDER_PAYMENT_NOT_FOUND", clock.instant());
+        } catch (PaymentProviderUncertainException | PaymentProviderPermanentException exception) {
+            return new PaymentVerificationResult(PaymentVerificationOutcome.PROVIDER_UNAVAILABLE,
+                    PaymentStatus.PENDING, PaymentActivationStatus.NOT_READY, null, null);
+        }
     }
 
     private PaymentVerificationResult afterProviderGet(

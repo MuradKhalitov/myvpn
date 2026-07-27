@@ -1,0 +1,41 @@
+warning: in the working copy of '.env.server.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of '.env.staging.example', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'compose.server.yaml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/server-deployment.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/client/FakePaymentProvider.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/config/PaymentEnvironmentGuard.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/model/PaymentOrder.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/CreatedPaymentValidator.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/PaymentProviderRegistry.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/PaymentVerificationService.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/PaymentVerificationTransactionService.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/impl/PaymentCheckoutServiceImpl.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/impl/PaymentCheckoutTransactionServiceImpl.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/impl/PaymentVerificationServiceImpl.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/java/ru/murad/myvpn/service/impl/PaymentVerificationTransactionServiceImpl.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/resources/application-prod.yml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/main/resources/application.yml', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/test/java/ru/murad/myvpn/config/PaymentEnvironmentGuardContextTest.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/test/java/ru/murad/myvpn/config/PaymentEnvironmentGuardTest.java', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/test/java/ru/murad/myvpn/service/impl/PaymentVerificationTransactionServiceIntegrationTest.java', LF will be replaced by CRLF the next time Git touches it
+ .env.server.example                                |  9 [32m++[m[31m-[m
+ .env.staging.example                               | 13 [32m+++[m[31m-[m
+ compose.server.yaml                                |  7 [32m+++[m
+ docs/server-deployment.md                          | 69 [32m+++++++++++++++++++++[m[31m-[m
+ .../ru/murad/myvpn/client/FakePaymentProvider.java |  5 [32m+[m[31m-[m
+ .../myvpn/config/PaymentEnvironmentGuard.java      | 14 [32m++++[m[31m-[m
+ .../java/ru/murad/myvpn/model/PaymentOrder.java    | 12 [32m++++[m
+ .../myvpn/service/CreatedPaymentValidator.java     |  6 [32m++[m
+ .../myvpn/service/PaymentProviderRegistry.java     | 16 [32m++++[m[31m-[m
+ .../myvpn/service/PaymentVerificationService.java  |  5 [32m+[m[31m-[m
+ .../PaymentVerificationTransactionService.java     |  2 [32m+[m
+ .../service/impl/PaymentCheckoutServiceImpl.java   |  5 [32m+[m[31m-[m
+ .../PaymentCheckoutTransactionServiceImpl.java     |  5 [32m++[m
+ .../impl/PaymentVerificationServiceImpl.java       | 22 [32m+++++++[m
+ .../PaymentVerificationTransactionServiceImpl.java | 30 [32m++++++++++[m
+ src/main/resources/application-prod.yml            |  4 [32m++[m
+ src/main/resources/application.yml                 |  9 [32m+++[m
+ .../config/PaymentEnvironmentGuardContextTest.java |  2 [32m+[m[31m-[m
+ .../myvpn/config/PaymentEnvironmentGuardTest.java  | 32 [32m+++++++++[m[31m-[m
+ ...ificationTransactionServiceIntegrationTest.java | 28 [32m+++++++++[m
+ 20 files changed, 278 insertions(+), 17 deletions(-)
