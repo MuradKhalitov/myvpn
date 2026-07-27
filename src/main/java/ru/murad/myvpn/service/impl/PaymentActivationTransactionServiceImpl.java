@@ -19,6 +19,7 @@ import ru.murad.myvpn.repository.VpnTariffRepository;
 import ru.murad.myvpn.service.*;
 
 import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -30,6 +31,7 @@ import java.security.NoSuchAlgorithmException;
 @RequiredArgsConstructor
 @Slf4j
 public class PaymentActivationTransactionServiceImpl implements PaymentActivationTransactionService {
+    private static final Duration PROVIDER_EXPIRY_TOLERANCE = Duration.ofSeconds(1);
     private final PaymentOrderRepository orders;
     private final SubscriptionRepository subscriptions;
     private final VpnAccessRepository accesses;
@@ -203,8 +205,10 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 || r.targetExpiresAt() == null) throw new PaymentOrderValidationException("Invalid VPN provider result");
         if (!Objects.equals(r.externalAccessId(), p.stableExternalClientId())) mismatch("externalAccessId");
         if (!Objects.equals(r.providerName(), p.vpnProviderName())) mismatch("providerName");
-        if (!r.targetExpiresAt().truncatedTo(ChronoUnit.MILLIS)
-                .equals(p.targetExpiresAt().truncatedTo(ChronoUnit.MILLIS))) mismatch("targetExpiresAt");
+        Duration expiryDifference = Duration.between(p.targetExpiresAt(), r.targetExpiresAt()).abs();
+        if (expiryDifference.compareTo(PROVIDER_EXPIRY_TOLERANCE) > 0) {
+            mismatchExpiry(p.targetExpiresAt(), r.targetExpiresAt(), expiryDifference);
+        }
         if (p.action() == PaymentActivationAction.PROVISION && (r.configurationData() == null || r.configurationData().isBlank())) throw new PaymentOrderValidationException("Incomplete VPN provision result");
     }
 
@@ -212,6 +216,21 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
         log.warn("VPN provider result mismatch: field={}", field);
         throw new ru.murad.myvpn.exception.PaymentActivationResultMismatchException(
                 "VPN provider result does not match activation snapshot");
+    }
+
+    private void mismatchExpiry(Instant expected, Instant actual, Duration difference) {
+        log.warn("VPN provider result mismatch: field=targetExpiresAt expected={} actual={} differenceMillis={}",
+                expected, actual, differenceMillis(difference));
+        throw new ru.murad.myvpn.exception.PaymentActivationResultMismatchException(
+                "VPN provider result does not match activation snapshot");
+    }
+
+    private long differenceMillis(Duration difference) {
+        try {
+            return difference.toMillis();
+        } catch (ArithmeticException ignored) {
+            return Long.MAX_VALUE;
+        }
     }
 
     private String configurationFingerprint(String configuration) {

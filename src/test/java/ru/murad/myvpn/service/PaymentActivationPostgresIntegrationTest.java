@@ -18,6 +18,7 @@ import ru.murad.myvpn.model.*;
 import ru.murad.myvpn.repository.*;
 import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.exception.PaymentActivationResultMismatchException;
+import ru.murad.myvpn.exception.PaymentOrderValidationException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -176,14 +177,68 @@ class PaymentActivationPostgresIntegrationTest {
     }
 
     @Test
-    void providerResultExpiryDifferentBySecondIsRejected() {
+    void providerResultExpiryOneMillisecondLaterIsAccepted() {
         PaymentOrder order = succeededOrder(7038L);
+        PreparedPaymentActivation prepared = activationTransactions.claimActivations(Instant.now(), 20).get(0);
+
+        assertThat(activationTransactions.complete(prepared,
+                new ProvisionedVpnAccess("FAKE", order.getUser().getId().toString(), "config",
+                        prepared.targetExpiresAt().plusMillis(1)), Instant.now()))
+                .isEqualTo(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED);
+    }
+
+    @Test
+    void providerResultExpiry999MillisecondsLaterIsAccepted() {
+        PaymentOrder order = succeededOrder(7041L);
+        PreparedPaymentActivation prepared = activationTransactions.claimActivations(Instant.now(), 20).get(0);
+
+        assertThat(activationTransactions.complete(prepared,
+                new ProvisionedVpnAccess("FAKE", order.getUser().getId().toString(), "config",
+                        prepared.targetExpiresAt().plusMillis(999)), Instant.now()))
+                .isEqualTo(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED);
+    }
+
+    @Test
+    void providerResultExpiryExactlyOneSecondLaterIsAccepted() {
+        PaymentOrder order = succeededOrder(7042L);
+        PreparedPaymentActivation prepared = activationTransactions.claimActivations(Instant.now(), 20).get(0);
+
+        assertThat(activationTransactions.complete(prepared,
+                new ProvisionedVpnAccess("FAKE", order.getUser().getId().toString(), "config",
+                        prepared.targetExpiresAt().plusSeconds(1)), Instant.now()))
+                .isEqualTo(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED);
+    }
+
+    @Test
+    void providerResultExpiry999MillisecondsEarlierIsAccepted() {
+        PaymentOrder order = succeededOrder(7043L);
+        PreparedPaymentActivation prepared = activationTransactions.claimActivations(Instant.now(), 20).get(0);
+
+        assertThat(activationTransactions.complete(prepared,
+                new ProvisionedVpnAccess("FAKE", order.getUser().getId().toString(), "config",
+                        prepared.targetExpiresAt().minusMillis(999)), Instant.now()))
+                .isEqualTo(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED);
+    }
+
+    @Test
+    void providerResultExpiry1001MillisecondsLaterIsRejected() {
+        PaymentOrder order = succeededOrder(7044L);
         PreparedPaymentActivation prepared = activationTransactions.claimActivations(Instant.now(), 20).get(0);
 
         assertThatThrownBy(() -> activationTransactions.complete(prepared,
                 new ProvisionedVpnAccess("FAKE", order.getUser().getId().toString(), "config",
-                        prepared.targetExpiresAt().plusSeconds(1)), Instant.now()))
+                        prepared.targetExpiresAt().plusMillis(1001)), Instant.now()))
                 .isInstanceOf(PaymentActivationResultMismatchException.class);
+    }
+
+    @Test
+    void providerResultWithNullExpiryIsInvalid() {
+        PaymentOrder order = succeededOrder(7045L);
+        PreparedPaymentActivation prepared = activationTransactions.claimActivations(Instant.now(), 20).get(0);
+
+        assertThatThrownBy(() -> activationTransactions.complete(prepared,
+                new ProvisionedVpnAccess("FAKE", order.getUser().getId().toString(), "config", null), Instant.now()))
+                .isInstanceOf(PaymentOrderValidationException.class);
     }
 
     @Test
@@ -564,11 +619,11 @@ class PaymentActivationPostgresIntegrationTest {
     }
 
     @Test
-    void providerResultExpiryMustMatchSnapshotBeforeRowsAreCreated() {
+    void providerResultExpiryBeyondToleranceIsRejectedBeforeRowsAreCreated() {
         PaymentOrder order = succeededOrder(7026L);
         PreparedPaymentActivation prepared = activationTransactions.claimActivations(Instant.now(), 20).get(0);
         ProvisionedVpnAccess wrong = new ProvisionedVpnAccess("FAKE", order.getUser().getId().toString(),
-                "fake-vpn://" + order.getUser().getId(), prepared.targetExpiresAt().plusSeconds(1));
+                "fake-vpn://" + order.getUser().getId(), prepared.targetExpiresAt().plusMillis(1001));
         assertThatThrownBy(() -> activationTransactions.complete(prepared, wrong, Instant.now()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(subscriptions.findAll()).isEmpty();
