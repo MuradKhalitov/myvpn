@@ -2,6 +2,7 @@ package ru.murad.myvpn.service.impl;
 
 import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.murad.myvpn.client.ProvisionedVpnAccess;
@@ -27,6 +28,7 @@ import java.security.NoSuchAlgorithmException;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class PaymentActivationTransactionServiceImpl implements PaymentActivationTransactionService {
     private final PaymentOrderRepository orders;
     private final SubscriptionRepository subscriptions;
@@ -199,12 +201,17 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
     private void validateResult(PreparedPaymentActivation p, ProvisionedVpnAccess r) {
         if (r == null || r.externalAccessId() == null || r.externalAccessId().isBlank() || r.externalAccessId().length() > 128
                 || r.targetExpiresAt() == null) throw new PaymentOrderValidationException("Invalid VPN provider result");
-        if (!Objects.equals(r.externalAccessId(), p.stableExternalClientId())
-                || !Objects.equals(r.providerName(), p.vpnProviderName())
-                || !r.targetExpiresAt().equals(p.targetExpiresAt())) {
-            throw new ru.murad.myvpn.exception.PaymentActivationResultMismatchException("VPN provider result does not match activation snapshot");
-        }
+        if (!Objects.equals(r.externalAccessId(), p.stableExternalClientId())) mismatch("externalAccessId");
+        if (!Objects.equals(r.providerName(), p.vpnProviderName())) mismatch("providerName");
+        if (!r.targetExpiresAt().truncatedTo(ChronoUnit.MILLIS)
+                .equals(p.targetExpiresAt().truncatedTo(ChronoUnit.MILLIS))) mismatch("targetExpiresAt");
         if (p.action() == PaymentActivationAction.PROVISION && (r.configurationData() == null || r.configurationData().isBlank())) throw new PaymentOrderValidationException("Incomplete VPN provision result");
+    }
+
+    private void mismatch(String field) {
+        log.warn("VPN provider result mismatch: field={}", field);
+        throw new ru.murad.myvpn.exception.PaymentActivationResultMismatchException(
+                "VPN provider result does not match activation snapshot");
     }
 
     private String configurationFingerprint(String configuration) {
