@@ -11,6 +11,7 @@ public record YooKassaProperties(
         String shopId,
         String secretKey,
         URI returnUrl,
+        boolean webhookEnabled,
         Duration connectTimeout,
         Duration readTimeout,
         Duration retryAfterMin,

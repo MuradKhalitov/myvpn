@@ -106,17 +106,9 @@ docker compose \
 
 Production requires real payment and VPN providers. Keep `.env.server` private and never commit it.
 
-For YooKassa, use these public HTTPS URLs behind the reverse proxy:
+For the first production version YooKassa webhook is not used. The application does not publish an HTTP port and no reverse proxy, public application domain, or inbound HTTPS route is required. The user receives `confirmation_url` in Telegram, completes payment, and then uses the bot's «Проверить оплату» action. The application verifies the payment with an authenticated YooKassa GET request; the existing pending-payment scheduling and activation/delivery workers continue this flow.
 
-```text
-Return:
-https://<domain>/api/payments/yookassa/return
-
-Webhook:
-https://<domain>/api/payments/yookassa/webhook
-```
-
-`YOOKASSA_RETURN_URL` is the redirect URL sent to YooKassa when a payment is created. `PAYMENT_RETURN_URL` remains the generic checkout return URL and should be set to the same public endpoint for an unambiguous deployment configuration. Configure the webhook URL in the YooKassa cabinet; it is not a runtime secret and is not required in `.env.server`.
+`YOOKASSA_RETURN_URL` remains required for YooKassa redirect confirmation. Set it to any public HTTPS static page that tells the user to return to Telegram and press «Проверить оплату»; it must not point to the application. `PAYMENT_RETURN_URL` is retained as the generic/fake-provider checkout URL, but YooKassa creates redirect payments with `YOOKASSA_RETURN_URL`. Set both variables to the same static page to avoid ambiguity.
 
 ## Update and rollback
 
@@ -177,39 +169,11 @@ Verify recovery only in a separate test database/container, for example with `pg
 
 If a real VLESS client UUID is exposed, create and assign a new UUID in the configured 3x-ui inbound, generate the replacement configuration, and deliver it to the verified user through the normal secure channel. Confirm that the old UUID no longer works before closing the incident. Do not log either configuration, UUID, cookie, password, or URI.
 
-## YooKassa test integration and public HTTPS endpoint
+## YooKassa manual verification
 
-Select YooKassa explicitly with `PAYMENT_PROVIDER=YOOKASSA`; production still rejects `FAKE`.
-Use only a test-shop `shopId` and test secret while validating this release. Set these values only in
-the protected server env file: `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, and
-`YOOKASSA_RETURN_URL`. Do not put them in Git, Docker build arguments, image labels, or logs.
+Select YooKassa with `PAYMENT_PROVIDER=YOOKASSA`; production rejects `FAKE`. Keep `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, and `YOOKASSA_RETURN_URL` only in the protected server environment file. Do not put them in Git, Docker build arguments, image labels, or logs.
 
-Before enabling YooKassa, create a DNS A/AAAA record for a domain controlled by the deployment
-owner and place Caddy or Nginx in front of the app:
-
-```text
-Internet HTTPS :443
-  -> reverse proxy
-  -> app container http://app:8080
-```
-
-The proxy must expose only `POST /api/payments/yookassa/webhook` and `GET /api/payments/yookassa/return`.
-Do not publish app port 8080, PostgreSQL 5432, or Actuator.
-Configure TLS with a trusted certificate (for example, Let's Encrypt), set
-`YOOKASSA_RETURN_URL=https://payments.example.com/api/payments/yookassa/return`, and configure the
-webhook URL `https://payments.example.com/api/payments/yookassa/webhook` in the YooKassa cabinet.
-Subscribe to `payment.succeeded` and `payment.canceled`.
-
-The endpoint treats the webhook body only as a hint. It queries the payment again through the
-authenticated YooKassa API and validates payment ID, amount, RUB currency, and local
-`payment_order_id` metadata before changing the local order. It does not provision VPN or send
-Telegram messages; the existing activation and delivery workers do that asynchronously. YooKassa
-also documents source-IP validation; enforce its published allowlist at the reverse proxy and keep
-it current. Do not use an invented webhook HMAC header.
-
-For rollback, first disable the webhook route in the YooKassa cabinet if the old image cannot
-handle it, restore the prior immutable application image, then re-enable only a compatible route.
-Image rollback does not roll back Liquibase migrations.
+The first production version has `YOOKASSA_WEBHOOK_ENABLED=false`. Do not configure a YooKassa webhook, Caddy/Nginx route, or a public Spring Boot endpoint for this release. Payment confirmation is performed exclusively by the bot action and pending-payment scheduler through authenticated YooKassa status GET requests. Image rollback does not roll back Liquibase migrations.
 
 ## Stop
 

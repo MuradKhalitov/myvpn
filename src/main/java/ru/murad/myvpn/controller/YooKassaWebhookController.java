@@ -14,7 +14,7 @@ import ru.murad.myvpn.dto.PaymentVerificationOutcome;
 import ru.murad.myvpn.service.PaymentVerificationService;
 
 @RestController
-@ConditionalOnProperty(name = "payment.provider", havingValue = "yookassa")
+@ConditionalOnProperty(name = "payment.yookassa.webhook-enabled", havingValue = "true")
 public class YooKassaWebhookController {
     private final PaymentVerificationService paymentVerificationService;
 

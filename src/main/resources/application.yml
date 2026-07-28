@@ -53,6 +53,7 @@ payment:
     shop-id: ${YOOKASSA_SHOP_ID:}
     secret-key: ${YOOKASSA_SECRET_KEY:}
     return-url: ${YOOKASSA_RETURN_URL:${PAYMENT_RETURN_URL:https://example.invalid/payment-return}}
+    webhook-enabled: ${YOOKASSA_WEBHOOK_ENABLED:false}
     connect-timeout: ${YOOKASSA_CONNECT_TIMEOUT:3s}
     read-timeout: ${YOOKASSA_READ_TIMEOUT:10s}
     retry-after-min: ${YOOKASSA_RETRY_AFTER_MIN:1s}

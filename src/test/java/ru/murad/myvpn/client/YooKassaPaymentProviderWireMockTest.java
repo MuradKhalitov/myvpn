@@ -47,6 +47,7 @@ class YooKassaPaymentProviderWireMockTest {
         provider = new YooKassaPaymentProvider(WebClient.builder().baseUrl(server.baseUrl()).build(),
                 new YooKassaProperties(URI.create(server.baseUrl()), "test-shop", "test-secret",
                         URI.create("https://bot.example.test/payments/yookassa/return"),
+                        false,
                         Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofSeconds(1), Duration.ofMinutes(15)), new ObjectMapper());
     }
 
