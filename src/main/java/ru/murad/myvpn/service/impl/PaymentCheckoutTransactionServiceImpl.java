@@ -58,7 +58,9 @@ public class PaymentCheckoutTransactionServiceImpl
         if (order != null && !order.getTariff().getId().equals(tariff.getId())) {
             throw new OpenPaymentOrderDifferentTariffException();
         }
-        if (order != null && order.getStatus() == PaymentStatus.PENDING
+        if (order != null
+                && (order.getStatus() == PaymentStatus.PENDING
+                || order.getStatus() == PaymentStatus.CREATING)
                 && !order.getExpiresAt().isAfter(now)) {
             order.markExpired(now);
             orderRepository.saveAndFlush(order);

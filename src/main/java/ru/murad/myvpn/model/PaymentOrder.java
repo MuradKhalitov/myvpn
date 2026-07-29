@@ -339,7 +339,7 @@ public class PaymentOrder {
 
     public void markExpired(Instant now) {
         transitionPayment(PaymentStatus.EXPIRED, now,
-                PaymentStatus.NEW, PaymentStatus.PENDING);
+                PaymentStatus.NEW, PaymentStatus.CREATING, PaymentStatus.PENDING);
     }
 
     public void markFailed(String failureCode, Instant now) {

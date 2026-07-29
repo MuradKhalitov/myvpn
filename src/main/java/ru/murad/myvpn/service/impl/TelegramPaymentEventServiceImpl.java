@@ -2,16 +2,16 @@ package ru.murad.myvpn.service.impl;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import ru.murad.myvpn.dto.TelegramPreCheckoutCommand;
 import ru.murad.myvpn.dto.TelegramSuccessfulPaymentCommand;
 import ru.murad.myvpn.service.TelegramPaymentEventService;
 import ru.murad.myvpn.service.TelegramPaymentGateway;
+import ru.murad.myvpn.config.ConditionalOnTelegramYooKassa;
 import ru.murad.myvpn.service.TelegramPaymentTransactionService;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "payment.provider", havingValue = "telegram-yookassa")
+@ConditionalOnTelegramYooKassa
 public class TelegramPaymentEventServiceImpl implements TelegramPaymentEventService {
 
     private static final String SAFE_ERROR =

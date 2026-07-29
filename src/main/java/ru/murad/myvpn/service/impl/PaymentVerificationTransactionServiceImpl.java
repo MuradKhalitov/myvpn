@@ -41,6 +41,11 @@ public class PaymentVerificationTransactionServiceImpl implements PaymentVerific
         if (order == null) return new PaymentVerificationPreparation(null, new PaymentVerificationResult(PaymentVerificationOutcome.NOT_FOUND, null, null, null, null));
         entityManager.clear();
         order = orders.findByIdForUpdate(order.getId()).orElseThrow(PaymentNotFoundException::new);
+        if (order.getStatus() == PaymentStatus.CREATING
+                && !order.getExpiresAt().isAfter(now)) {
+            order.markExpired(now);
+            orders.saveAndFlush(order);
+        }
         var immediate = immediate(order, now, interval);
         if (immediate != null) return new PaymentVerificationPreparation(null, immediate);
         if (!order.reserveVerification(now, interval))

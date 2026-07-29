@@ -25,6 +25,7 @@ class PaymentOrderTest {
     private static final Instant NOW = Instant.parse("2026-07-25T10:00:00Z");
     private static final Set<String> ALLOWED_PAYMENT_TRANSITIONS = Set.of(
             "NEW->CREATING", "NEW->EXPIRED", "NEW->FAILED",
+            "CREATING->EXPIRED",
             "CREATING->PENDING", "CREATING->SUCCEEDED", "CREATING->CANCELED",
             "CREATING->FAILED", "CREATING->MANUAL_REVIEW_REQUIRED",
             "PENDING->SUCCEEDED", "PENDING->CANCELED", "PENDING->EXPIRED",

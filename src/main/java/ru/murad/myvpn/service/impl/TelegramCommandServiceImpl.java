@@ -1,5 +1,6 @@
 package ru.murad.myvpn.service.impl;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import ru.murad.myvpn.client.PaymentConfirmationUrl;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 @Service
+@Slf4j
 public class TelegramCommandServiceImpl implements TelegramCommandService {
 
     private static final Pattern TARIFF_CALLBACK_CODE = Pattern.compile("[A-Z0-9_-]{1,32}");
@@ -151,6 +153,9 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
         } catch (IllegalArgumentException exception) {
             return TelegramCommandResponse.text("Не удалось выполнить действие: " + exception.getMessage());
         } catch (RuntimeException exception) {
+            log.error("Telegram callback action failed exceptionType={} stackTrace={}",
+                    exception.getClass().getName(),
+                    java.util.Arrays.toString(exception.getStackTrace()));
             return TelegramCommandResponse.text("Не удалось выполнить действие. Повторите попытку позже.");
         }
     }

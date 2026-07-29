@@ -3,7 +3,6 @@ package ru.murad.myvpn.service.impl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import ru.murad.myvpn.dto.TelegramPreCheckoutCommand;
 import ru.murad.myvpn.dto.TelegramSuccessfulPaymentCommand;
 import ru.murad.myvpn.exception.PaymentProviderUncertainException;
@@ -12,13 +11,14 @@ import ru.murad.myvpn.model.PaymentProviderType;
 import ru.murad.myvpn.model.PaymentStatus;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
 import ru.murad.myvpn.service.TelegramPaymentTransactionService;
+import ru.murad.myvpn.config.ConditionalOnTelegramYooKassa;
 
 import java.math.RoundingMode;
 import java.time.Clock;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "payment.provider", havingValue = "telegram-yookassa")
+@ConditionalOnTelegramYooKassa
 public class TelegramPaymentTransactionServiceImpl
         implements TelegramPaymentTransactionService {
 

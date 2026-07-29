@@ -136,6 +136,33 @@ class PaymentVerificationTelegramIntegrationTest {
     }
 
     @Test
+    void expiredCreatingOrderIsClosedAndNewCheckoutIsAllowed() {
+        long userId = BASE_USER_ID + 40;
+        PaymentOrder order = checkout(userId);
+        jdbc.update("""
+                update payment_orders
+                set status='CREATING', provider_payment_id=null,
+                    confirmation_url=null, expires_at=current_timestamp - interval '1 second'
+                where id=?
+                """, order.getId());
+        entityManager.clear();
+        clearInvocations(provider);
+
+        String response = check(userId);
+
+        assertThat(response).isNotBlank();
+        assertThat(read(order.getId()).getStatus()).isEqualTo(PaymentStatus.EXPIRED);
+        verify(provider, times(0))
+                .getPayment(org.mockito.ArgumentMatchers.anyString());
+
+        commandService.handleCallback(
+                new TelegramCallbackQuery(userId, userId, "buy:MONTH_1"));
+        assertThat(orderRepository.findAllByUserOrderByCreatedAtDesc(
+                userRepository.findByTelegramId(userId).orElseThrow().getId()))
+                .hasSize(2);
+    }
+
+    @Test
     void noOrderAndManualReviewHaveSafeResponses() {
         assertThat(check(BASE_USER_ID + 5)).doesNotContain("Exception", "paymentOrderId");
         long userId = BASE_USER_ID + 6;

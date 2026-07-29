@@ -92,7 +92,9 @@ public class TelegramLongPollingBot
             try {
                 processUpdate(update);
             } catch (RuntimeException exception) {
-                log.error("Failed to process Telegram update");
+                log.error("Failed to process Telegram update exceptionType={} stackTrace={}",
+                        exception.getClass().getName(),
+                        java.util.Arrays.toString(exception.getStackTrace()));
             }
         });
     }
@@ -163,6 +165,9 @@ public class TelegramLongPollingBot
             response = commandService.handleCallback(new TelegramCallbackQuery(
                     callback.getFrom().getId(), chatId, callback.getData()));
         } catch (RuntimeException exception) {
+            log.error("Failed to process Telegram callback exceptionType={} stackTrace={}",
+                    exception.getClass().getName(),
+                    java.util.Arrays.toString(exception.getStackTrace()));
             response = TelegramCommandResponse.text(
                     "Не удалось выполнить действие. Повторите попытку позже.");
         }
@@ -189,7 +194,9 @@ public class TelegramLongPollingBot
             }
             telegramClient.execute(builder.build());
         } catch (TelegramApiException exception) {
-            log.error("Failed to send Telegram response to chat {}", chatId);
+            log.error("Failed to send Telegram response exceptionType={} stackTrace={}",
+                    exception.getClass().getName(),
+                    java.util.Arrays.toString(exception.getStackTrace()));
         }
     }
 
@@ -199,7 +206,9 @@ public class TelegramLongPollingBot
                     .callbackQueryId(callbackId)
                     .build());
         } catch (TelegramApiException exception) {
-            log.error("Failed to answer Telegram callback");
+            log.error("Failed to answer Telegram callback exceptionType={} stackTrace={}",
+                    exception.getClass().getName(),
+                    java.util.Arrays.toString(exception.getStackTrace()));
         }
     }
 }

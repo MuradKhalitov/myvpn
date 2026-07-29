@@ -16,8 +16,10 @@ import java.net.URI;
 import java.time.*;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 class TelegramPaymentCheckoutServiceTest {
@@ -61,6 +63,66 @@ class TelegramPaymentCheckoutServiceTest {
         assertThat(result.destination())
                 .isEqualTo(new CheckoutDestination.TelegramInvoiceSent(55));
         verifyNoInteractions(invoices);
+    }
+
+    @Test
+    void missingInvoiceProviderMarksCreatingOrderFailed() {
+        PaymentCheckoutTransactionService transactions =
+                mock(PaymentCheckoutTransactionService.class);
+        PreparedCheckout prepared = prepared(PaymentStatus.CREATING, null);
+        when(transactions.prepareCheckout(anyLong(), anyString(), any(), any(), any()))
+                .thenReturn(prepared);
+        PaymentCheckoutServiceImpl service = new PaymentCheckoutServiceImpl(
+                mock(TelegramUserRepository.class), mock(PaymentOrderRepository.class),
+                mock(PaymentProviderRegistry.class), transactions,
+                new PaymentProperties(PaymentProviderType.TELEGRAM_YOOKASSA,
+                        Duration.ofHours(1), URI.create("https://example.test"), false),
+                Clock.fixed(NOW, ZoneOffset.UTC), Optional.empty());
+
+        assertThatThrownBy(() -> service.startCheckout(100, "MONTH"))
+                .isInstanceOf(ru.murad.myvpn.exception.PaymentProviderPermanentException.class);
+        verify(transactions).markPermanentFailure(prepared, NOW);
+    }
+
+    @Test
+    void timeoutMarksCreatingOrderForManualReview() {
+        PaymentCheckoutTransactionService transactions =
+                mock(PaymentCheckoutTransactionService.class);
+        TelegramInvoiceProvider invoices = mock(TelegramInvoiceProvider.class);
+        PreparedCheckout prepared = prepared(PaymentStatus.CREATING, null);
+        when(transactions.prepareCheckout(anyLong(), anyString(), any(), any(), any()))
+                .thenReturn(prepared);
+        when(invoices.sendInvoice(prepared)).thenThrow(
+                new ru.murad.myvpn.exception.PaymentProviderUncertainException("timeout"));
+
+        assertThatThrownBy(() -> service(transactions, invoices)
+                .startCheckout(100, "MONTH"))
+                .isInstanceOf(ru.murad.myvpn.exception.PaymentProviderUncertainException.class);
+        verify(transactions).markTelegramInvoiceUncertain(prepared, NOW);
+        verify(transactions, never()).markPermanentFailure(any(), any());
+    }
+
+    @Test
+    void sendInvoiceRunsWithoutActiveDatabaseTransaction() {
+        PaymentCheckoutTransactionService transactions =
+                mock(PaymentCheckoutTransactionService.class);
+        TelegramInvoiceProvider invoices = mock(TelegramInvoiceProvider.class);
+        PreparedCheckout prepared = prepared(PaymentStatus.CREATING, null);
+        when(transactions.prepareCheckout(anyLong(), anyString(), any(), any(), any()))
+                .thenReturn(prepared);
+        when(invoices.sendInvoice(prepared)).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager
+                    .isActualTransactionActive()).isFalse();
+            return 55;
+        });
+        when(transactions.applyTelegramInvoice(prepared, 55, NOW))
+                .thenReturn(new PaymentCheckoutResult(
+                        prepared.orderId(), prepared.tariffName(), prepared.amount(),
+                        "RUB", 30, PaymentStatus.PENDING,
+                        new CheckoutDestination.TelegramInvoiceSent(55),
+                        prepared.localExpiresAt()));
+
+        service(transactions, invoices).startCheckout(100, "MONTH");
     }
 
     private PaymentCheckoutServiceImpl service(

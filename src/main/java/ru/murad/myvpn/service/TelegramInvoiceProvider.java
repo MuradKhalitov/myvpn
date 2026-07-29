@@ -1,8 +1,8 @@
 package ru.murad.myvpn.service;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
+import ru.murad.myvpn.config.ConditionalOnTelegramYooKassa;
 import ru.murad.myvpn.dto.PreparedCheckout;
 import ru.murad.myvpn.dto.TelegramInvoiceRequest;
 import ru.murad.myvpn.exception.PaymentProviderPermanentException;
@@ -11,7 +11,7 @@ import java.math.RoundingMode;
 
 @Service
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "payment.provider", havingValue = "telegram-yookassa")
+@ConditionalOnTelegramYooKassa
 public class TelegramInvoiceProvider {
 
     private final TelegramPaymentGateway gateway;

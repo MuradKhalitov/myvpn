@@ -1,6 +1,7 @@
 package ru.murad.myvpn.service.impl;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import ru.murad.myvpn.config.PaymentProperties;
 import ru.murad.myvpn.dto.CreatePaymentCommand;
@@ -28,6 +29,7 @@ import java.time.Instant;
 import java.util.Map;
 
 @Service
+@Slf4j
 public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
 
     private final TelegramUserRepository userRepository;
@@ -78,18 +80,20 @@ public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
         }
 
         if (prepared.provider() == PaymentProviderType.TELEGRAM_YOOKASSA) {
-            TelegramInvoiceProvider invoiceProvider = telegramInvoiceProvider
-                    .orElseThrow(() -> new PaymentProviderPermanentException(
-                            "Telegram invoice provider is unavailable"));
             try {
+                TelegramInvoiceProvider invoiceProvider = telegramInvoiceProvider
+                        .orElseThrow(() -> new PaymentProviderPermanentException(
+                                "Telegram invoice provider is unavailable"));
                 int messageId = invoiceProvider.sendInvoice(prepared);
                 return transactionService.applyTelegramInvoice(
                         prepared, messageId, clock.instant());
             } catch (PaymentProviderUncertainException uncertain) {
+                logCheckoutFailure(prepared, uncertain, "uncertain");
                 transactionService.markTelegramInvoiceUncertain(
                         prepared, clock.instant());
                 throw uncertain;
             } catch (PaymentProviderPermanentException permanent) {
+                logCheckoutFailure(prepared, permanent, "permanent");
                 transactionService.markPermanentFailure(prepared, clock.instant());
                 throw permanent;
             }
@@ -180,5 +184,18 @@ public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
                 prepared.orderId(), prepared.tariffName(), prepared.amount(),
                 prepared.currency(), prepared.durationDays(), prepared.status(),
                 destination, prepared.localExpiresAt());
+    }
+
+    private void logCheckoutFailure(
+            PreparedCheckout prepared,
+            RuntimeException exception,
+            String classification
+    ) {
+        log.error(
+                "Telegram invoice checkout failed orderId={} userId={} tariffCode={} "
+                        + "provider={} classification={} exceptionType={} stackTrace={}",
+                prepared.orderId(), prepared.userId(), prepared.tariffCode(),
+                prepared.provider(), classification, exception.getClass().getName(),
+                java.util.Arrays.toString(exception.getStackTrace()));
     }
 }
