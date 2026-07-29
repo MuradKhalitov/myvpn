@@ -26,6 +26,17 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, UUID
 
     Optional<PaymentOrder> findByIdempotenceKey(UUID idempotenceKey);
 
+    Optional<PaymentOrder> findByTelegramInvoicePayload(String payload);
+
+    Optional<PaymentOrder> findByTelegramPaymentChargeId(String chargeId);
+
+    Optional<PaymentOrder> findByProviderPaymentChargeId(String chargeId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from PaymentOrder p join fetch p.user where p.telegramInvoicePayload = :payload")
+    Optional<PaymentOrder> findByTelegramInvoicePayloadForUpdate(
+            @Param("payload") String payload);
+
     Optional<PaymentOrder> findFirstByUserIdAndStatusIn(
             UUID userId,
             Collection<PaymentStatus> statuses

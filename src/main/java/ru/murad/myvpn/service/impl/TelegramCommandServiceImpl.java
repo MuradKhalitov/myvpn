@@ -174,13 +174,21 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
     }
 
     private TelegramCommandResponse checkout(PaymentCheckoutResult checkout) {
-        PaymentConfirmationUrl.fake(checkout.confirmationUrl());
+        if (checkout.destination() instanceof CheckoutDestination.TelegramInvoiceSent) {
+            return TelegramCommandResponse.text(
+                    "Счёт на тариф «" + checkout.tariffName()
+                            + "» отправлен в этот чат. Оплатите его средствами Telegram.");
+        }
+        var redirect = (CheckoutDestination.RedirectUrl) checkout.destination();
+        if (paymentProperties.provider() == PaymentProviderType.FAKE) {
+            PaymentConfirmationUrl.fake(redirect.url());
+        }
         String text = "Тариф: " + checkout.tariffName()
                 + "\nСтоимость: " + checkout.amount().toPlainString() + " " + checkout.currency()
                 + "\nСрок: " + checkout.durationDays() + " дней"
                 + "\n\nНажмите кнопку для оплаты.";
         return new TelegramCommandResponse(text, List.of(
-                List.of(TelegramButton.url("Оплатить", checkout.confirmationUrl().toString())),
+                List.of(TelegramButton.url("Оплатить", redirect.url().toString())),
                 List.of(TelegramButton.callback("Проверить оплату", "payment:check"))));
     }
 

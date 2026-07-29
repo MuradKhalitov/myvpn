@@ -1,7 +1,7 @@
 # Shared runtime hardening is inherited from application.yml.
-# Staging deliberately exercises a real 3x-ui provider with fake payments only.
+# Staging uses the BotFather/YooKassa test provider token.
 payment:
-  provider: ${PAYMENT_PROVIDER:fake}
+  provider: ${PAYMENT_PROVIDER:telegram-yookassa}
   allow-fake: ${PAYMENT_ALLOW_FAKE:false}
   activation:
     enabled: ${PAYMENT_ACTIVATION_ENABLED:true}

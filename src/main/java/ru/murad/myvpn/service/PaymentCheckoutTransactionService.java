@@ -24,5 +24,10 @@ public interface PaymentCheckoutTransactionService {
             Instant now
     );
 
+    PaymentCheckoutResult applyTelegramInvoice(
+            PreparedCheckout prepared, int messageId, Instant now);
+
     void markPermanentFailure(PreparedCheckout prepared, Instant now);
+
+    void markTelegramInvoiceUncertain(PreparedCheckout prepared, Instant now);
 }

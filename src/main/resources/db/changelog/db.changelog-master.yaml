@@ -21,3 +21,5 @@ databaseChangeLog:
       file: db/changelog/changes/010-harden-payment-activation-audit.yaml
   - include:
       file: db/changelog/changes/011-add-vpn-delivery-outbox.yaml
+  - include:
+      file: db/changelog/changes/012-add-telegram-payments.yaml

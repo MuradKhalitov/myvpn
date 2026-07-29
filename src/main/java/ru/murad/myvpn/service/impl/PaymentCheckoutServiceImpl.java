@@ -21,13 +21,13 @@ import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.service.PaymentCheckoutService;
 import ru.murad.myvpn.service.PaymentCheckoutTransactionService;
 import ru.murad.myvpn.service.PaymentProviderRegistry;
+import ru.murad.myvpn.service.TelegramInvoiceProvider;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
 
 @Service
-@RequiredArgsConstructor
 public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
 
     private final TelegramUserRepository userRepository;
@@ -36,6 +36,38 @@ public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
     private final PaymentCheckoutTransactionService transactionService;
     private final PaymentProperties properties;
     private final Clock clock;
+    private final java.util.Optional<TelegramInvoiceProvider> telegramInvoiceProvider;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public PaymentCheckoutServiceImpl(
+            TelegramUserRepository userRepository,
+            PaymentOrderRepository orderRepository,
+            PaymentProviderRegistry providerRegistry,
+            PaymentCheckoutTransactionService transactionService,
+            PaymentProperties properties,
+            Clock clock,
+            java.util.Optional<TelegramInvoiceProvider> telegramInvoiceProvider
+    ) {
+        this.userRepository = userRepository;
+        this.orderRepository = orderRepository;
+        this.providerRegistry = providerRegistry;
+        this.transactionService = transactionService;
+        this.properties = properties;
+        this.clock = clock;
+        this.telegramInvoiceProvider = telegramInvoiceProvider;
+    }
+
+    public PaymentCheckoutServiceImpl(
+            TelegramUserRepository userRepository,
+            PaymentOrderRepository orderRepository,
+            PaymentProviderRegistry providerRegistry,
+            PaymentCheckoutTransactionService transactionService,
+            PaymentProperties properties,
+            Clock clock
+    ) {
+        this(userRepository, orderRepository, providerRegistry, transactionService,
+                properties, clock, java.util.Optional.empty());
+    }
 
     @Override
     public PaymentCheckoutResult startCheckout(long telegramUserId, String tariffCode) {
@@ -43,6 +75,24 @@ public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
                 telegramUserId, tariffCode, clock.instant());
         if (prepared.status() == PaymentStatus.PENDING) {
             return result(prepared);
+        }
+
+        if (prepared.provider() == PaymentProviderType.TELEGRAM_YOOKASSA) {
+            TelegramInvoiceProvider invoiceProvider = telegramInvoiceProvider
+                    .orElseThrow(() -> new PaymentProviderPermanentException(
+                            "Telegram invoice provider is unavailable"));
+            try {
+                int messageId = invoiceProvider.sendInvoice(prepared);
+                return transactionService.applyTelegramInvoice(
+                        prepared, messageId, clock.instant());
+            } catch (PaymentProviderUncertainException uncertain) {
+                transactionService.markTelegramInvoiceUncertain(
+                        prepared, clock.instant());
+                throw uncertain;
+            } catch (PaymentProviderPermanentException permanent) {
+                transactionService.markPermanentFailure(prepared, clock.instant());
+                throw permanent;
+            }
         }
 
         CreatedPayment created;
@@ -115,9 +165,20 @@ public class PaymentCheckoutServiceImpl implements PaymentCheckoutService {
     }
 
     private PaymentCheckoutResult result(PreparedCheckout prepared) {
+        ru.murad.myvpn.dto.CheckoutDestination destination;
+        if (prepared.provider() == PaymentProviderType.TELEGRAM_YOOKASSA
+                && prepared.telegramInvoiceMessageId() != null) {
+            destination = new ru.murad.myvpn.dto.CheckoutDestination.TelegramInvoiceSent(
+                    prepared.telegramInvoiceMessageId());
+        } else if (prepared.confirmationUrl() != null) {
+            destination = new ru.murad.myvpn.dto.CheckoutDestination.RedirectUrl(
+                    prepared.confirmationUrl());
+        } else {
+            throw new PaymentProviderUncertainException("Checkout result is incomplete");
+        }
         return new PaymentCheckoutResult(
                 prepared.orderId(), prepared.tariffName(), prepared.amount(),
                 prepared.currency(), prepared.durationDays(), prepared.status(),
-                prepared.confirmationUrl(), prepared.localExpiresAt());
+                destination, prepared.localExpiresAt());
     }
 }

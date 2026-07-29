@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.murad.myvpn.client.PaymentConfirmationUrl;
 import ru.murad.myvpn.dto.CreatedPayment;
+import ru.murad.myvpn.dto.CheckoutDestination;
 import ru.murad.myvpn.dto.PaymentCheckoutResult;
 import ru.murad.myvpn.dto.PreparedCheckout;
 import ru.murad.myvpn.exception.OpenPaymentOrderAlreadyExistsException;
@@ -127,6 +128,20 @@ public class PaymentCheckoutTransactionServiceImpl
         orderRepository.saveAndFlush(order);
     }
 
+    @Override
+    @Transactional
+    public void markTelegramInvoiceUncertain(PreparedCheckout prepared, Instant now) {
+        PaymentOrder order = orderRepository.findByIdForUpdate(prepared.orderId())
+                .orElseThrow(PaymentNotFoundException::new);
+        validateIdentity(order, prepared);
+        if (order.getStatus() == PaymentStatus.CREATING
+                || order.getStatus() == PaymentStatus.PENDING) {
+            order.markPaymentManualReviewRequired(
+                    "TELEGRAM_INVOICE_UNCERTAIN", now);
+            orderRepository.saveAndFlush(order);
+        }
+    }
+
     private void validateIdentity(PaymentOrder order, PreparedCheckout prepared) {
         if (!order.getUser().getId().equals(prepared.userId())
                 || !order.getTariff().getId().equals(prepared.tariffId())
@@ -152,14 +167,46 @@ public class PaymentCheckoutTransactionServiceImpl
             }
         }
         return new PreparedCheckout(
-                order.getId(), order.getUser().getId(), order.getTariff().getId(),
+                order.getId(), order.getUser().getId(), order.getUser().getTelegramId(),
+                order.getUser().getChatId(), order.getTariff().getId(),
                 order.getProvider(), order.getIdempotenceKey(), order.getAmount(),
                 order.getCurrency(), order.getTariffCodeSnapshot(),
                 order.getTariffNameSnapshot(), order.getDurationDaysSnapshot(),
-                order.getStatus(), url, order.getExpiresAt());
+                order.getStatus(), url, order.getTelegramInvoicePayload(),
+                order.getTelegramInvoiceMessageId(), order.getExpiresAt());
+    }
+
+    @Override
+    @Transactional
+    public PaymentCheckoutResult applyTelegramInvoice(
+            PreparedCheckout prepared, int messageId, Instant now
+    ) {
+        PaymentOrder order = orderRepository.findByIdForUpdate(prepared.orderId())
+                .orElseThrow(PaymentNotFoundException::new);
+        validateIdentity(order, prepared);
+        try {
+            order.markTelegramInvoiceSent(messageId, now);
+            orderRepository.saveAndFlush(order);
+        } catch (PaymentOrderValidationException | PaymentStateTransitionException invalid) {
+            throw new PaymentProviderUncertainException(
+                    "Telegram invoice result could not be applied safely");
+        }
+        return result(order);
     }
 
     private PaymentCheckoutResult result(PaymentOrder order) {
+        if (order.getProvider() == PaymentProviderType.TELEGRAM_YOOKASSA) {
+            Integer messageId = order.getTelegramInvoiceMessageId();
+            if (messageId == null) {
+                throw new PaymentProviderUncertainException(
+                        "Telegram invoice result is incomplete");
+            }
+            return new PaymentCheckoutResult(
+                    order.getId(), order.getTariffNameSnapshot(), order.getAmount(),
+                    order.getCurrency(), order.getDurationDaysSnapshot(),
+                    order.getStatus(), new CheckoutDestination.TelegramInvoiceSent(messageId),
+                    order.getExpiresAt());
+        }
         URI url;
         try {
             url = URI.create(order.getConfirmationUrl());
@@ -171,7 +218,8 @@ public class PaymentCheckoutTransactionServiceImpl
         return new PaymentCheckoutResult(
                 order.getId(), order.getTariffNameSnapshot(), order.getAmount(),
                 order.getCurrency(), order.getDurationDaysSnapshot(),
-                order.getStatus(), url, order.getExpiresAt());
+                order.getStatus(), new CheckoutDestination.RedirectUrl(url),
+                order.getExpiresAt());
     }
 
     private void validateUrl(PaymentProviderType provider, URI url) {

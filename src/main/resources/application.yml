@@ -48,6 +48,13 @@ payment:
   pending-ttl: ${PAYMENT_PENDING_TTL:1h}
   return-url: ${PAYMENT_RETURN_URL:https://example.invalid/payment-return}
   allow-fake: ${PAYMENT_ALLOW_FAKE:false}
+  telegram:
+    provider-token: ${TELEGRAM_PAYMENT_PROVIDER_TOKEN:}
+    currency: RUB
+    pre-checkout-timeout: ${TELEGRAM_PAYMENT_PRE_CHECKOUT_TIMEOUT:9s}
+    receipt-enabled: ${TELEGRAM_PAYMENT_RECEIPT_ENABLED:false}
+    vat-code: ${TELEGRAM_PAYMENT_VAT_CODE:}
+    receipt-contact: ${TELEGRAM_PAYMENT_RECEIPT_CONTACT:}
   yookassa:
     base-url: ${YOOKASSA_BASE_URL:https://api.yookassa.ru/v3}
     shop-id: ${YOOKASSA_SHOP_ID:}

@@ -21,8 +21,13 @@ import ru.murad.myvpn.dto.TelegramIncomingMessage;
 import ru.murad.myvpn.dto.TelegramCallbackQuery;
 import ru.murad.myvpn.dto.TelegramCommandResponse;
 import ru.murad.myvpn.service.TelegramCommandService;
+import ru.murad.myvpn.service.TelegramPaymentEventService;
+import ru.murad.myvpn.dto.TelegramPreCheckoutCommand;
+import ru.murad.myvpn.dto.TelegramSuccessfulPaymentCommand;
 
+import java.time.Clock;
 import java.util.List;
+import java.util.Optional;
 
 @Slf4j
 @Component
@@ -34,14 +39,18 @@ public class TelegramLongPollingBot
     private final TelegramProperties properties;
     private final TelegramCommandService commandService;
     private final TelegramClient telegramClient;
+    private final Optional<TelegramPaymentEventService> paymentEventService;
+    private final Clock clock;
 
     @Autowired
     public TelegramLongPollingBot(
             TelegramProperties properties,
-            TelegramCommandService commandService
+            TelegramCommandService commandService,
+            Optional<TelegramPaymentEventService> paymentEventService,
+            Clock clock
     ) {
-        this(properties, commandService,
-                new OkHttpTelegramClient(properties.botToken()));
+        this(properties, commandService, new OkHttpTelegramClient(properties.botToken()),
+                paymentEventService, clock);
     }
 
     TelegramLongPollingBot(
@@ -49,9 +58,22 @@ public class TelegramLongPollingBot
             TelegramCommandService commandService,
             TelegramClient telegramClient
     ) {
+        this(properties, commandService, telegramClient, Optional.empty(),
+                Clock.systemUTC());
+    }
+
+    TelegramLongPollingBot(
+            TelegramProperties properties,
+            TelegramCommandService commandService,
+            TelegramClient telegramClient,
+            Optional<TelegramPaymentEventService> paymentEventService,
+            Clock clock
+    ) {
         this.properties = properties;
         this.commandService = commandService;
         this.telegramClient = telegramClient;
+        this.paymentEventService = paymentEventService;
+        this.clock = clock;
     }
 
     @Override
@@ -66,10 +88,24 @@ public class TelegramLongPollingBot
 
     @Override
     public void consume(List<Update> updates) {
-        updates.forEach(this::processUpdate);
+        updates.forEach(update -> {
+            try {
+                processUpdate(update);
+            } catch (RuntimeException exception) {
+                log.error("Failed to process Telegram update");
+            }
+        });
     }
 
     private void processUpdate(Update update) {
+        if (update.hasPreCheckoutQuery()) {
+            processPreCheckout(update);
+            return;
+        }
+        if (update.hasMessage() && update.getMessage().hasSuccessfulPayment()) {
+            processSuccessfulPayment(update);
+            return;
+        }
         if (update.hasCallbackQuery()) {
             processCallback(update);
             return;
@@ -85,6 +121,33 @@ public class TelegramLongPollingBot
                 from.getId(), message.getChatId(), from.getUserName(),
                 from.getFirstName(), from.getLastName(), message.getText()));
         send(message.getChatId(), response);
+    }
+
+    private void processPreCheckout(Update update) {
+        var query = update.getPreCheckoutQuery();
+        if (query.getFrom() == null || paymentEventService.isEmpty()) {
+            if (paymentEventService.isPresent()) {
+                paymentEventService.get().handlePreCheckout(new TelegramPreCheckoutCommand(
+                        query.getId(), 0L, query.getInvoicePayload(),
+                        query.getCurrency(), query.getTotalAmount()));
+            }
+            return;
+        }
+        paymentEventService.get().handlePreCheckout(new TelegramPreCheckoutCommand(
+                query.getId(), query.getFrom().getId(), query.getInvoicePayload(),
+                query.getCurrency(), query.getTotalAmount()));
+    }
+
+    private void processSuccessfulPayment(Update update) {
+        var message = update.getMessage();
+        if (message.getFrom() == null || paymentEventService.isEmpty()) return;
+        var payment = message.getSuccessfulPayment();
+        paymentEventService.get().handleSuccessfulPayment(
+                new TelegramSuccessfulPaymentCommand(
+                        message.getFrom().getId(), payment.getInvoicePayload(),
+                        payment.getCurrency(), payment.getTotalAmount(),
+                        payment.getTelegramPaymentChargeId(),
+                        payment.getProviderPaymentChargeId(), clock.instant()));
     }
 
     private void processCallback(Update update) {

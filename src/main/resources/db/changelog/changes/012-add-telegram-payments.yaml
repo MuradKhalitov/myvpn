@@ -1,0 +1,34 @@
+databaseChangeLog:
+  - changeSet:
+      id: 012-add-telegram-payments
+      author: myvpn
+      changes:
+        - addColumn:
+            tableName: payment_orders
+            columns:
+              - column: { name: telegram_invoice_payload, type: varchar(64) }
+              - column: { name: telegram_invoice_message_id, type: integer }
+              - column: { name: telegram_payment_charge_id, type: varchar(256) }
+              - column: { name: provider_payment_charge_id, type: varchar(256) }
+        - addUniqueConstraint:
+            tableName: payment_orders
+            columnNames: telegram_invoice_payload
+            constraintName: uk_payment_orders_telegram_payload
+        - addUniqueConstraint:
+            tableName: payment_orders
+            columnNames: telegram_payment_charge_id
+            constraintName: uk_payment_orders_telegram_charge
+        - addUniqueConstraint:
+            tableName: payment_orders
+            columnNames: provider_payment_charge_id
+            constraintName: uk_payment_orders_provider_charge
+        - sql:
+            sql: >
+              ALTER TABLE payment_orders
+              ADD CONSTRAINT chk_payment_orders_telegram_invoice_message
+              CHECK (telegram_invoice_message_id IS NULL OR telegram_invoice_message_id > 0)
+      rollback:
+        - dropColumn: { tableName: payment_orders, columnName: provider_payment_charge_id }
+        - dropColumn: { tableName: payment_orders, columnName: telegram_payment_charge_id }
+        - dropColumn: { tableName: payment_orders, columnName: telegram_invoice_message_id }
+        - dropColumn: { tableName: payment_orders, columnName: telegram_invoice_payload }

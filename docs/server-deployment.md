@@ -180,3 +180,30 @@ The first production version has `YOOKASSA_WEBHOOK_ENABLED=false`. Do not config
 ```bash
 docker compose -f compose.server.yaml down
 ```
+# Telegram Payments with YooKassa
+
+The primary staging/production payment mode is
+`PAYMENT_PROVIDER=TELEGRAM_YOOKASSA`. It uses the existing Telegram long-polling
+connection; no payment webhook is required. Set
+`TELEGRAM_PAYMENT_PROVIDER_TOKEN` only in the server environment. Never commit
+the token or print it in logs.
+
+For the first test:
+
+1. In BotFather open `/mybots`, select the bot, then **Payments**.
+2. Choose **Connect YooKassa: test** and obtain the test provider token.
+3. Put that token in `TELEGRAM_PAYMENT_PROVIDER_TOKEN` and deploy staging.
+4. Run the invoice/pre-checkout/successful-payment flow with Telegram's test
+   payment method.
+
+After a successful test E2E, return to BotFather → Payments, choose the YooKassa
+live connection, and replace only `TELEGRAM_PAYMENT_PROVIDER_TOKEN`. The
+application deliberately does not infer test/live mode from token contents.
+
+Receipt generation is disabled by default. If the YooKassa shop requires
+fiscalization, set `TELEGRAM_PAYMENT_RECEIPT_ENABLED=true`, provide the shop's
+confirmed `TELEGRAM_PAYMENT_VAT_CODE`, and set
+`TELEGRAM_PAYMENT_RECEIPT_CONTACT=email` or `phone`. The selected contact is
+requested by the Telegram invoice and sent to the provider. Confirm the VAT
+code, fiscal regime, item description, and YooKassa receipt settings with the
+merchant's accountant/YooKassa before enabling live payments.

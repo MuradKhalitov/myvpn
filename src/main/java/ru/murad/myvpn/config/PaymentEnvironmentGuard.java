@@ -56,6 +56,10 @@ public class PaymentEnvironmentGuard {
             require(environment, "payment.yookassa.secret-key");
             require(environment, "payment.yookassa.return-url");
         }
+        if (environment.acceptsProfiles(Profiles.of("prod", "staging"))
+                && properties.provider() == PaymentProviderType.TELEGRAM_YOOKASSA) {
+            require(environment, "payment.telegram.provider-token");
+        }
     }
 
     private void require(Environment environment, String key) {
