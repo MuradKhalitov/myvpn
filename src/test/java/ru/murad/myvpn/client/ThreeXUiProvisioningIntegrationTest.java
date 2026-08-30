@@ -14,14 +14,16 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.containers.PostgreSQLContainer;
+import ru.murad.myvpn.adapter.telegram.TelegramUserIdResolver;
+import ru.murad.myvpn.application.subscription.CurrentSubscriptionQuery;
 import ru.murad.myvpn.config.ThreeXUiProperties;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
 import ru.murad.myvpn.exception.ThreeXUiUncertainException;
-import ru.murad.myvpn.mapper.SubscriptionMapper;
 import ru.murad.myvpn.model.SubscriptionStatus;
 import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.UserRole;
 import ru.murad.myvpn.repository.SubscriptionRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
 import ru.murad.myvpn.service.impl.SubscriptionServiceImpl;
@@ -72,10 +74,12 @@ class ThreeXUiProvisioningIntegrationTest {
     }
 
     @Autowired private TelegramUserRepository userRepository;
+    @Autowired private AccountRepository accountRepository;
     @Autowired private SubscriptionRepository subscriptionRepository;
     @Autowired private VpnAccessRepository accessRepository;
-    @Autowired private SubscriptionMapper subscriptionMapper;
     @Autowired private SubscriptionTransactionService transactionService;
+    @Autowired private TelegramUserIdResolver userIdResolver;
+    @Autowired private CurrentSubscriptionQuery currentSubscriptionQuery;
 
     private WireMockServer server;
 
@@ -84,7 +88,9 @@ class ThreeXUiProvisioningIntegrationTest {
         accessRepository.deleteAll();
         subscriptionRepository.deleteAll();
         userRepository.deleteAll();
-        userRepository.saveAndFlush(TelegramUser.builder()
+        accountRepository.deleteAll();
+        ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accountRepository, userRepository, TelegramUser.builder()
                 .id(UUID.randomUUID())
                 .telegramId(USER_ID)
                 .chatId(USER_ID)
@@ -121,11 +127,11 @@ class ThreeXUiProvisioningIntegrationTest {
                 properties);
         SubscriptionService service = new SubscriptionServiceImpl(
                 administratorId -> { },
-                subscriptionRepository,
                 accessRepository,
                 provider,
-                subscriptionMapper,
                 transactionService,
+                userIdResolver,
+                currentSubscriptionQuery,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.activate(

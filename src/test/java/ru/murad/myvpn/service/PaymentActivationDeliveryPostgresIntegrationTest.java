@@ -27,9 +27,9 @@ class PaymentActivationDeliveryPostgresIntegrationTest {
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) { r.add("spring.datasource.url", POSTGRES::getJdbcUrl); r.add("spring.datasource.username", POSTGRES::getUsername); r.add("spring.datasource.password", POSTGRES::getPassword); }
     @Autowired PaymentActivationTransactionService activation; @Autowired PaymentOrderRepository orders; @Autowired VpnDeliveryRepository deliveries;
     @Autowired VpnDeliveryTransactionService deliveryTransactions;
-    @Autowired TelegramUserRepository users; @Autowired VpnTariffRepository tariffs; @Autowired SubscriptionRepository subscriptions; @Autowired VpnAccessRepository accesses; @Autowired JdbcTemplate jdbc;
+    @Autowired TelegramUserRepository users; @Autowired AccountRepository accounts; @Autowired VpnTariffRepository tariffs; @Autowired SubscriptionRepository subscriptions; @Autowired VpnAccessRepository accesses; @Autowired JdbcTemplate jdbc;
     @Autowired EntityManager entityManager;
-    @BeforeEach void clean() { deliveries.deleteAll(); orders.deleteAll(); accesses.deleteAll(); subscriptions.deleteAll(); users.deleteAll(); tariffs.deleteAll(); }
+    @BeforeEach void clean() { deliveries.deleteAll(); orders.deleteAll(); accesses.deleteAll(); subscriptions.deleteAll(); users.deleteAll(); accounts.deleteAll(); tariffs.deleteAll(); }
     @Test void provisionCreatesOneDurableDeliveryWithoutConfigurationCopyAndMicros() {
         PaymentOrder order = succeededOrder(); PreparedPaymentActivation claim = activation.claimActivations(NOW, 10).get(0);
         assertThat(activation.complete(claim, result(claim, "fake-vpn://top-secret"), NOW)).isEqualTo(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED);
@@ -80,7 +80,7 @@ class PaymentActivationDeliveryPostgresIntegrationTest {
         Subscription subscriptionA = subscriptions.findAll().get(0); Instant originalExpiry = subscriptionA.getExpiresAt();
         PaymentOrder extension = succeededOrder(); PreparedPaymentActivation claim = activation.claimActivations(NOW.plusSeconds(1), 10)
                 .stream().filter(candidate -> candidate.paymentOrderId().equals(extension.getId())).findFirst().orElseThrow();
-        TelegramUser userB = users.save(TelegramUser.builder().id(UUID.randomUUID()).telegramId(8002L).chatId(8002L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
+        TelegramUser userB = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(accounts, users, TelegramUser.builder().id(UUID.randomUUID()).telegramId(8002L).chatId(8002L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
         VpnTariff tariff = tariffs.findAll().get(0);
         Subscription subscriptionB = subscriptions.save(Subscription.builder().id(UUID.randomUUID()).user(userB).tariff(tariff).status(SubscriptionStatus.ACTIVE)
                 .startsAt(NOW).expiresAt(NOW.plus(Duration.ofDays(30))).activatedByTelegramId(userB.getTelegramId()).activatedAt(NOW).createdAt(NOW).updatedAt(NOW).build());
@@ -117,7 +117,7 @@ class PaymentActivationDeliveryPostgresIntegrationTest {
         assertThat(reread.getStatus()).isEqualTo(VpnDeliveryStatus.DELIVERED);
         assertThat(reread.getDeliveredAt()).isNotNull();
     }
-    private PaymentOrder succeededOrder() { TelegramUser user = users.findAll().stream().findFirst().orElseGet(() -> users.save(TelegramUser.builder().id(UUID.randomUUID()).telegramId(8001L).chatId(8001L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build())); VpnTariff tariff = tariffs.findAll().stream().findFirst().orElseGet(() -> tariffs.save(VpnTariff.builder().id(UUID.randomUUID()).code("MONTH").name("Month").durationDays(30).price(new BigDecimal("90.00")).currency("RUB").active(true).createdAt(NOW).updatedAt(NOW).build())); PaymentOrder order = PaymentOrder.create(user, tariff, PaymentProviderType.FAKE, NOW, Duration.ofHours(1)); order.markCreating(NOW); order.markPending(UUID.randomUUID().toString(), "https://example.invalid", NOW, null, NOW); order.markSucceeded(NOW, NOW); return orders.saveAndFlush(order); }
+    private PaymentOrder succeededOrder() { TelegramUser user = users.findAll().stream().findFirst().orElseGet(() -> ru.murad.myvpn.support.AccountTestData.saveTelegramUser(accounts, users, TelegramUser.builder().id(UUID.randomUUID()).telegramId(8001L).chatId(8001L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build())); VpnTariff tariff = tariffs.findAll().stream().findFirst().orElseGet(() -> tariffs.save(VpnTariff.builder().id(UUID.randomUUID()).code("MONTH").name("Month").durationDays(30).price(new BigDecimal("90.00")).currency("RUB").active(true).createdAt(NOW).updatedAt(NOW).build())); PaymentOrder order = PaymentOrder.create(user, tariff, PaymentProviderType.FAKE, NOW, Duration.ofHours(1)); order.markCreating(NOW); order.markPending(UUID.randomUUID().toString(), "https://example.invalid", NOW, null, NOW); order.markSucceeded(NOW, NOW); return orders.saveAndFlush(order); }
     private ProvisionedVpnAccess result(PreparedPaymentActivation claim, String config) { return new ProvisionedVpnAccess("FAKE", claim.stableExternalClientId(), config, claim.targetExpiresAt()); }
     private String sha(String value) { try { byte[] bytes = java.security.MessageDigest.getInstance("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)); StringBuilder out = new StringBuilder(); for (byte b : bytes) out.append(String.format("%02x", b)); return out.toString(); } catch (Exception e) { throw new AssertionError(e); } }
 }

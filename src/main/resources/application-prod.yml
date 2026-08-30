@@ -17,6 +17,8 @@ spring:
       validation-timeout: ${DB_HIKARI_VALIDATION_TIMEOUT:3000}
       idle-timeout: ${DB_HIKARI_IDLE_TIMEOUT:300000}
       max-lifetime: ${DB_HIKARI_MAX_LIFETIME:1500000}
+  mail:
+    host: ${SMTP_HOST:?SMTP_HOST is required in production}
 
 vpn:
   delivery:
@@ -24,3 +26,14 @@ vpn:
   provider:
     type: ${VPN_PROVIDER_TYPE:?VPN_PROVIDER_TYPE is required in production}
     allow-fake: ${VPN_PROVIDER_ALLOW_FAKE:false}
+
+auth:
+  enabled: true
+  email-from: ${AUTH_EMAIL_FROM:?AUTH_EMAIL_FROM is required in production}
+  otp:
+    pepper: ${AUTH_OTP_PEPPER:?AUTH_OTP_PEPPER is required in production}
+  jwt:
+    private-key-base64: ${AUTH_JWT_PRIVATE_KEY_BASE64:?AUTH_JWT_PRIVATE_KEY_BASE64 is required in production}
+    public-key-base64: ${AUTH_JWT_PUBLIC_KEY_BASE64:?AUTH_JWT_PUBLIC_KEY_BASE64 is required in production}
+  refresh:
+    pepper: ${AUTH_REFRESH_PEPPER:?AUTH_REFRESH_PEPPER is required in production}

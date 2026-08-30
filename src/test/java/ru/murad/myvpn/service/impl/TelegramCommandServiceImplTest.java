@@ -4,6 +4,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import ru.murad.myvpn.adapter.telegram.TelegramUserIdResolver;
+import ru.murad.myvpn.application.subscription.CurrentSubscriptionQuery;
+import ru.murad.myvpn.application.vpn.CurrentVpnAccessQuery;
 import ru.murad.myvpn.config.PaymentProperties;
 import ru.murad.myvpn.dto.PaymentCheckoutResult;
 import ru.murad.myvpn.dto.PaymentVerificationOutcome;
@@ -55,6 +58,9 @@ class TelegramCommandServiceImplTest {
     @Mock private PaymentOrderRepository paymentOrderRepository;
     @Mock private FakePaymentControlService fakePaymentControlService;
     @Mock private PaymentOrder paymentOrder;
+    @Mock private TelegramUserIdResolver userIdResolver;
+    @Mock private CurrentSubscriptionQuery currentSubscriptionQuery;
+    @Mock private CurrentVpnAccessQuery currentVpnAccessQuery;
 
     @Test
     void shouldRegisterUserOnStartAndReturnCleanRussianHelp() {
@@ -72,6 +78,7 @@ class TelegramCommandServiceImplTest {
     @Test
     void helpAndMissingSubscriptionMustUseCleanRussianTemplates() {
         String help = service().handle(message("/help"));
+        when(userIdResolver.resolve(1L)).thenReturn(UUID.randomUUID());
         String subscription = service().handle(message("/subscription"));
 
         assertThat(help).contains("Доступные команды", "текущая подписка");
@@ -194,20 +201,23 @@ class TelegramCommandServiceImplTest {
     private TelegramCommandServiceImpl service() {
         return new TelegramCommandServiceImpl(userService, tariffService, subscriptionService,
                 adminAuthorizationService, paymentCheckoutService, paymentProperties(), telegramUserRepository,
-                paymentOrderRepository, Optional.empty(), Optional.empty());
+                paymentOrderRepository, Optional.empty(), Optional.empty(), userIdResolver,
+                currentSubscriptionQuery, currentVpnAccessQuery);
     }
 
     private TelegramCommandServiceImpl serviceWithVerification() {
         return new TelegramCommandServiceImpl(userService, tariffService, subscriptionService,
                 adminAuthorizationService, paymentCheckoutService, paymentVerificationService, paymentProperties(),
-                telegramUserRepository, paymentOrderRepository, Optional.empty(), Optional.empty(), Optional.empty());
+                telegramUserRepository, paymentOrderRepository, Optional.empty(), Optional.empty(), Optional.empty(),
+                userIdResolver, currentSubscriptionQuery, currentVpnAccessQuery);
     }
 
     private TelegramCommandServiceImpl serviceWithFakeControl() {
         return new TelegramCommandServiceImpl(userService, tariffService, subscriptionService,
                 adminAuthorizationService, paymentCheckoutService, paymentVerificationService, paymentProperties(),
                 telegramUserRepository, paymentOrderRepository, Optional.of(fakePaymentControlService),
-                Optional.empty(), Optional.empty());
+                Optional.empty(), Optional.empty(), userIdResolver,
+                currentSubscriptionQuery, currentVpnAccessQuery);
     }
 
     private PaymentProperties paymentProperties() {

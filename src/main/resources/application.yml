@@ -15,6 +15,17 @@ spring:
     enabled: true
   lifecycle:
     timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:30s}
+  mail:
+    host: ${SMTP_HOST:smtp.mail.ru}
+    port: ${SMTP_PORT:465}
+    username: ${SMTP_USERNAME:myvpn-otp@mail.ru}
+    password: ${SMTP_PASSWORD:Je0KfQYm5hBCybza7rku}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:false}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:false}
+      mail.smtp.connectiontimeout: ${SMTP_CONNECT_TIMEOUT_MS:5000}
+      mail.smtp.timeout: ${SMTP_READ_TIMEOUT_MS:5000}
+      mail.smtp.writetimeout: ${SMTP_WRITE_TIMEOUT_MS:5000}
 
 server:
   shutdown: graceful
@@ -106,3 +117,22 @@ vpn:
     expiration-check-delay: 60000
     configuration-cleanup-delay: 3600000
     pending-recovery-delay: 60000
+
+auth:
+  enabled: ${AUTH_ENABLED:false}
+  email-from: ${AUTH_EMAIL_FROM:}
+  otp:
+    ttl: ${AUTH_OTP_TTL:5m}
+    resend-cooldown: ${AUTH_OTP_RESEND_COOLDOWN:60s}
+    max-attempts: ${AUTH_OTP_MAX_ATTEMPTS:5}
+    pepper: ${AUTH_OTP_PEPPER:}
+  jwt:
+    issuer: ${AUTH_JWT_ISSUER:https://auth.myvpn.local}
+    audience: ${AUTH_JWT_AUDIENCE:myvpn-android}
+    access-ttl: ${AUTH_JWT_ACCESS_TTL:15m}
+    key-id: ${AUTH_JWT_KEY_ID:myvpn-1}
+    private-key-base64: ${AUTH_JWT_PRIVATE_KEY_BASE64:}
+    public-key-base64: ${AUTH_JWT_PUBLIC_KEY_BASE64:}
+  refresh:
+    ttl: ${AUTH_REFRESH_TTL:30d}
+    pepper: ${AUTH_REFRESH_PEPPER:}

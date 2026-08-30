@@ -23,3 +23,7 @@ databaseChangeLog:
       file: db/changelog/changes/011-add-vpn-delivery-outbox.yaml
   - include:
       file: db/changelog/changes/012-add-telegram-payments.yaml
+  - include:
+      file: db/changelog/changes/013-add-accounts-and-identities.yaml
+  - include:
+      file: db/changelog/changes/014-add-email-auth.yaml

@@ -29,6 +29,7 @@ import ru.murad.myvpn.model.VpnAccess;
 import ru.murad.myvpn.model.VpnAccessStatus;
 import ru.murad.myvpn.model.VpnTariff;
 import ru.murad.myvpn.repository.SubscriptionRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
 import ru.murad.myvpn.repository.VpnTariffRepository;
@@ -75,6 +76,7 @@ class SubscriptionConcurrencyIntegrationTest {
     @Autowired private SubscriptionTransactionService transactionService;
     @Autowired private SubscriptionRepository subscriptionRepository;
     @Autowired private TelegramUserRepository userRepository;
+    @Autowired private AccountRepository accountRepository;
     @Autowired private VpnTariffRepository tariffRepository;
     @Autowired private VpnAccessRepository accessRepository;
     @Autowired private EntityManagerFactory entityManagerFactory;
@@ -84,6 +86,7 @@ class SubscriptionConcurrencyIntegrationTest {
         accessRepository.deleteAll();
         subscriptionRepository.deleteAll();
         userRepository.deleteAll();
+        accountRepository.deleteAll();
     }
 
     @Test
@@ -525,7 +528,7 @@ class SubscriptionConcurrencyIntegrationTest {
                         SubscriptionStatus.MANUAL_REVIEW_REQUIRED, 7202L);
                 connection.commit();
 
-                liquibase.rollback(5, new Contexts(), new LabelExpression());
+                liquibase.rollback(7, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.columns
@@ -691,7 +694,8 @@ class SubscriptionConcurrencyIntegrationTest {
     }
 
     private Subscription subscription(SubscriptionStatus status, Instant updatedAt) {
-        TelegramUser user = userRepository.saveAndFlush(TelegramUser.builder()
+        TelegramUser user = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accountRepository, userRepository, TelegramUser.builder()
                 .id(UUID.randomUUID())
                 .telegramId(Math.abs(UUID.randomUUID().getLeastSignificantBits()))
                 .chatId(1L)
@@ -730,6 +734,17 @@ class SubscriptionConcurrencyIntegrationTest {
             long telegramId
     ) throws java.sql.SQLException {
         UUID user = UUID.randomUUID();
+        if (resultValue(statement, """
+                SELECT count(*)::text
+                FROM information_schema.tables
+                WHERE table_schema='%s' AND table_name='accounts'
+                """.formatted(schema)).equals("1")) {
+            statement.execute("""
+                    INSERT INTO %s.accounts
+                    (id,status,version,created_at,updated_at)
+                    VALUES ('%s','ACTIVE',0,now(),now())
+                    """.formatted(schema, user));
+        }
         statement.execute("""
                 INSERT INTO %s.telegram_users
                 (id,telegram_id,chat_id,role,created_at,updated_at)

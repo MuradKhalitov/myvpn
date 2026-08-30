@@ -11,6 +11,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.containers.PostgreSQLContainer;
+import ru.murad.myvpn.model.Account;
+import ru.murad.myvpn.model.AccountStatus;
 import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.UserRole;
 
@@ -40,6 +42,9 @@ class TelegramUserRepositoryIntegrationTest {
     @Autowired
     private TelegramUserRepository repository;
 
+    @Autowired
+    private AccountRepository accountRepository;
+
     @Test
     void shouldSaveAndFindUserByTelegramId() {
         TelegramUser user = createUser(1001L, 2001L);
@@ -68,8 +73,15 @@ class TelegramUserRepositoryIntegrationTest {
 
     private TelegramUser createUser(long telegramId, long chatId) {
         Instant now = Instant.parse("2026-07-24T10:00:00Z");
+        UUID id = UUID.randomUUID();
+        accountRepository.saveAndFlush(Account.builder()
+                .id(id)
+                .status(AccountStatus.ACTIVE)
+                .createdAt(now)
+                .updatedAt(now)
+                .build());
         return TelegramUser.builder()
-                .id(UUID.randomUUID())
+                .id(id)
                 .telegramId(telegramId)
                 .chatId(chatId)
                 .username("user")

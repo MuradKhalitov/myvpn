@@ -22,6 +22,7 @@ import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.UserRole;
 import ru.murad.myvpn.model.VpnTariff;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
@@ -61,6 +62,7 @@ class PaymentActivationSensitiveFailureIntegrationTest {
     @Autowired private SubscriptionRepository subscriptions;
     @Autowired private VpnAccessRepository accesses;
     @Autowired private TelegramUserRepository users;
+    @Autowired private AccountRepository accounts;
     @Autowired private VpnTariffRepository tariffs;
     @Autowired private EntityManager entityManager;
     @MockitoBean private VpnProvider vpnProvider;
@@ -71,6 +73,7 @@ class PaymentActivationSensitiveFailureIntegrationTest {
         accesses.deleteAll();
         subscriptions.deleteAll();
         users.deleteAll();
+        accounts.deleteAll();
         tariffs.deleteAll();
         when(vpnProvider.providerName()).thenReturn("FAKE");
     }
@@ -117,8 +120,9 @@ class PaymentActivationSensitiveFailureIntegrationTest {
 
     private PaymentOrder succeededOrder() {
         long telegramId = Math.abs(UUID.randomUUID().getLeastSignificantBits());
-        TelegramUser user = users.save(TelegramUser.builder().id(UUID.randomUUID()).telegramId(telegramId)
-                .chatId(telegramId).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
+        TelegramUser user = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accounts, users, TelegramUser.builder().id(UUID.randomUUID()).telegramId(telegramId)
+                        .chatId(telegramId).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
         VpnTariff tariff = tariffs.save(VpnTariff.builder().id(UUID.randomUUID()).code("SAFE_" + telegramId)
                 .name("Safe").durationDays(30).price(new BigDecimal("90.00")).currency("RUB")
                 .active(true).createdAt(NOW).updatedAt(NOW).build());

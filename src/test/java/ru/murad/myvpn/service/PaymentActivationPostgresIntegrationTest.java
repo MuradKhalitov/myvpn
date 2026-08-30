@@ -56,13 +56,14 @@ class PaymentActivationPostgresIntegrationTest {
     @Autowired private VpnAccessRepository accesses;
     @Autowired private VpnDeliveryRepository deliveries;
     @Autowired private TelegramUserRepository users;
+    @Autowired private AccountRepository accounts;
     @Autowired private VpnTariffRepository tariffs;
     @Autowired private EntityManager entityManager;
     @Autowired private PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void clean() {
-        deliveries.deleteAll(); orders.deleteAll(); accesses.deleteAll(); subscriptions.deleteAll(); users.deleteAll(); tariffs.deleteAll();
+        deliveries.deleteAll(); orders.deleteAll(); accesses.deleteAll(); subscriptions.deleteAll(); users.deleteAll(); accounts.deleteAll(); tariffs.deleteAll();
     }
 
     @Test
@@ -645,8 +646,11 @@ class PaymentActivationPostgresIntegrationTest {
     }
 
     private TelegramUser user(long telegramId) {
-        return TelegramUser.builder().id(UUID.randomUUID()).telegramId(telegramId).chatId(telegramId)
-                .role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build();
+        return ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accounts, users,
+                TelegramUser.builder().id(UUID.randomUUID())
+                        .telegramId(telegramId).chatId(telegramId)
+                        .role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
     }
 
     private VpnTariff tariff(String code, int durationDays) {

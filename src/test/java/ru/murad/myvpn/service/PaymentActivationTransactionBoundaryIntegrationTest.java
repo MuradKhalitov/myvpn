@@ -21,6 +21,7 @@ import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.UserRole;
 import ru.murad.myvpn.model.VpnTariff;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
@@ -64,6 +65,7 @@ class PaymentActivationTransactionBoundaryIntegrationTest {
     @Autowired private SubscriptionRepository subscriptions;
     @Autowired private VpnAccessRepository accesses;
     @Autowired private TelegramUserRepository users;
+    @Autowired private AccountRepository accounts;
     @Autowired private VpnTariffRepository tariffs;
     @MockitoBean private VpnProvider vpnProvider;
 
@@ -73,6 +75,7 @@ class PaymentActivationTransactionBoundaryIntegrationTest {
         accesses.deleteAll();
         subscriptions.deleteAll();
         users.deleteAll();
+        accounts.deleteAll();
         tariffs.deleteAll();
         when(vpnProvider.providerName()).thenReturn("FAKE");
     }
@@ -94,8 +97,9 @@ class PaymentActivationTransactionBoundaryIntegrationTest {
     }
 
     private PaymentOrder succeededOrder() {
-        TelegramUser user = users.save(TelegramUser.builder().id(UUID.randomUUID()).telegramId(88001L)
-                .chatId(88001L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
+        TelegramUser user = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accounts, users, TelegramUser.builder().id(UUID.randomUUID()).telegramId(88001L)
+                        .chatId(88001L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
         VpnTariff tariff = tariffs.save(VpnTariff.builder().id(UUID.randomUUID()).code("BOUNDARY")
                 .name("Boundary").durationDays(30).price(new BigDecimal("90.00")).currency("RUB")
                 .active(true).createdAt(NOW).updatedAt(NOW).build());

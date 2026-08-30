@@ -1,0 +1,73 @@
+databaseChangeLog:
+  - changeSet:
+      id: 014-add-email-auth
+      author: myvpn
+      changes:
+        - createTable:
+            tableName: email_otp_challenges
+            columns:
+              - column: { name: id, type: uuid, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: normalized_email, type: varchar(320), constraints: { nullable: false } }
+              - column: { name: code_hash, type: varchar(64), constraints: { nullable: false } }
+              - column: { name: expires_at, type: timestamp with time zone, constraints: { nullable: false } }
+              - column: { name: resend_after, type: timestamp with time zone, constraints: { nullable: false } }
+              - column: { name: attempts, type: int, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: max_attempts, type: int, constraints: { nullable: false } }
+              - column: { name: consumed_at, type: timestamp with time zone }
+              - column: { name: invalidated_at, type: timestamp with time zone }
+              - column: { name: created_at, type: timestamp with time zone, constraints: { nullable: false } }
+              - column: { name: version, type: bigint, defaultValueNumeric: 0, constraints: { nullable: false } }
+        - sql:
+            sql: >
+              ALTER TABLE email_otp_challenges
+              ADD CONSTRAINT chk_email_otp_attempts
+              CHECK (attempts >= 0 AND max_attempts > 0 AND attempts <= max_attempts)
+        - createIndex:
+            tableName: email_otp_challenges
+            indexName: idx_email_otp_lookup
+            columns:
+              - column: { name: normalized_email }
+              - column: { name: created_at, descending: true }
+        - sql:
+            sql: >
+              CREATE UNIQUE INDEX uk_email_otp_one_active
+              ON email_otp_challenges (normalized_email)
+              WHERE consumed_at IS NULL AND invalidated_at IS NULL
+        - createTable:
+            tableName: auth_sessions
+            columns:
+              - column: { name: id, type: uuid, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: account_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: refresh_token_hash, type: varchar(64), constraints: { nullable: false } }
+              - column: { name: token_family_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: rotation_counter, type: bigint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: expires_at, type: timestamp with time zone, constraints: { nullable: false } }
+              - column: { name: last_used_at, type: timestamp with time zone }
+              - column: { name: revoked_at, type: timestamp with time zone }
+              - column: { name: created_at, type: timestamp with time zone, constraints: { nullable: false } }
+              - column: { name: version, type: bigint, defaultValueNumeric: 0, constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            baseTableName: auth_sessions
+            baseColumnNames: account_id
+            referencedTableName: accounts
+            referencedColumnNames: id
+            constraintName: fk_auth_sessions_account
+        - addUniqueConstraint:
+            tableName: auth_sessions
+            columnNames: refresh_token_hash
+            constraintName: uk_auth_sessions_refresh_hash
+        - createIndex:
+            tableName: auth_sessions
+            indexName: idx_auth_sessions_account
+            columns:
+              - column: { name: account_id }
+        - createIndex:
+            tableName: auth_sessions
+            indexName: idx_auth_sessions_family
+            columns:
+              - column: { name: token_family_id }
+      rollback:
+        - dropTable:
+            tableName: auth_sessions
+        - dropTable:
+            tableName: email_otp_challenges

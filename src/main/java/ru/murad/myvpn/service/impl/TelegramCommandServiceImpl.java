@@ -3,12 +3,19 @@ package ru.murad.myvpn.service.impl;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import ru.murad.myvpn.adapter.telegram.TelegramUserIdResolver;
+import ru.murad.myvpn.application.subscription.CurrentSubscriptionQuery;
+import ru.murad.myvpn.application.subscription.CurrentSubscriptionView;
+import ru.murad.myvpn.application.vpn.CurrentVpnAccessQuery;
+import ru.murad.myvpn.application.vpn.VpnAccessView;
 import ru.murad.myvpn.client.PaymentConfirmationUrl;
 import ru.murad.myvpn.config.PaymentProperties;
 import ru.murad.myvpn.dto.*;
 import ru.murad.myvpn.exception.AdministratorAccessDeniedException;
 import ru.murad.myvpn.exception.FakePaymentStateLostException;
 import ru.murad.myvpn.exception.PaymentNotFoundException;
+import ru.murad.myvpn.exception.TelegramUserNotFoundException;
+import ru.murad.myvpn.exception.VpnAccessNotFoundException;
 import ru.murad.myvpn.model.PaymentProviderType;
 import ru.murad.myvpn.model.PaymentStatus;
 import ru.murad.myvpn.model.ProviderPaymentStatus;
@@ -48,6 +55,9 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
     private final Optional<FakePaymentControlService> fakePaymentControlService;
     private final Optional<FakePaymentRecoveryService> fakePaymentRecoveryService;
     private final Optional<VpnConfigurationCommandService> vpnConfigurationCommandService;
+    private final TelegramUserIdResolver userIdResolver;
+    private final CurrentSubscriptionQuery currentSubscriptionQuery;
+    private final CurrentVpnAccessQuery currentVpnAccessQuery;
 
     @Autowired
     public TelegramCommandServiceImpl(
@@ -62,7 +72,10 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
             PaymentOrderRepository paymentOrderRepository,
             Optional<FakePaymentControlService> fakePaymentControlService,
             Optional<FakePaymentRecoveryService> fakePaymentRecoveryService,
-            Optional<VpnConfigurationCommandService> vpnConfigurationCommandService) {
+            Optional<VpnConfigurationCommandService> vpnConfigurationCommandService,
+            TelegramUserIdResolver userIdResolver,
+            CurrentSubscriptionQuery currentSubscriptionQuery,
+            CurrentVpnAccessQuery currentVpnAccessQuery) {
         this.userService = userService;
         this.tariffService = tariffService;
         this.subscriptionService = subscriptionService;
@@ -75,6 +88,9 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
         this.fakePaymentControlService = fakePaymentControlService;
         this.fakePaymentRecoveryService = fakePaymentRecoveryService;
         this.vpnConfigurationCommandService = vpnConfigurationCommandService;
+        this.userIdResolver = userIdResolver;
+        this.currentSubscriptionQuery = currentSubscriptionQuery;
+        this.currentVpnAccessQuery = currentVpnAccessQuery;
     }
 
     public TelegramCommandServiceImpl(
@@ -87,11 +103,15 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
             TelegramUserRepository telegramUserRepository,
             PaymentOrderRepository paymentOrderRepository,
             Optional<FakePaymentControlService> fakePaymentControlService,
-            Optional<FakePaymentRecoveryService> fakePaymentRecoveryService) {
+            Optional<FakePaymentRecoveryService> fakePaymentRecoveryService,
+            TelegramUserIdResolver userIdResolver,
+            CurrentSubscriptionQuery currentSubscriptionQuery,
+            CurrentVpnAccessQuery currentVpnAccessQuery) {
         this(userService, tariffService, subscriptionService, adminAuthorizationService,
                 paymentCheckoutService, null, paymentProperties, telegramUserRepository,
                 paymentOrderRepository, fakePaymentControlService, fakePaymentRecoveryService,
-                Optional.empty());
+                Optional.empty(), userIdResolver, currentSubscriptionQuery,
+                currentVpnAccessQuery);
     }
 
     @Override
@@ -268,9 +288,18 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
     }
 
     private String subscription(long telegramId) {
-        return subscriptionService.findCurrent(telegramId)
-                .map(this::formatSubscription)
-                .orElse("Активная подписка не найдена.");
+        try {
+            var userId = userIdResolver.resolve(telegramId);
+            return currentSubscriptionQuery.findCurrent(userId)
+                    .map(subscription -> formatSubscription(
+                            subscription,
+                            currentVpnAccessQuery.findCurrent(userId)
+                                    .orElseThrow(() -> new VpnAccessNotFoundException(
+                                            subscription.id()))))
+                    .orElse("Активная подписка не найдена.");
+        } catch (TelegramUserNotFoundException notFound) {
+            return "Активная подписка не найдена.";
+        }
     }
 
     private String activate(long adminTelegramId, String[] parts) {
@@ -296,12 +325,15 @@ public class TelegramCommandServiceImpl implements TelegramCommandService {
                 + "\n" + subscription(telegramId);
     }
 
-    private String formatSubscription(SubscriptionDto subscription) {
-        String configuration = subscription.configurationData() == null
+    private String formatSubscription(
+            CurrentSubscriptionView subscription,
+            VpnAccessView access
+    ) {
+        String configuration = access.configuration() == null
                 ? "Конфигурация недоступна" : "Конфигурация доступна";
         return "Тариф: " + subscription.tariff().name()
                 + "\nДействует до: " + subscription.expiresAt()
-                + "\nПровайдер: " + subscription.providerName()
+                + "\nПровайдер: " + access.providerName()
                 + "\nКонфигурация: " + configuration
                 + "\nДля получения конфигурации используйте /vpn в личном чате.";
     }

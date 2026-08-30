@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import ru.murad.myvpn.adapter.telegram.TelegramUserIdResolver;
+import ru.murad.myvpn.application.subscription.CurrentSubscriptionQuery;
 import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.client.VpnExtensionRequest;
 import ru.murad.myvpn.client.VpnProvider;
@@ -13,8 +15,6 @@ import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
 import ru.murad.myvpn.dto.RevokeSubscriptionRequest;
 import ru.murad.myvpn.dto.SubscriptionDto;
 import ru.murad.myvpn.exception.AdministratorAccessDeniedException;
-import ru.murad.myvpn.mapper.SubscriptionMapper;
-import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
 import ru.murad.myvpn.service.ActivationPreparation;
 import ru.murad.myvpn.service.AdminAuthorizationService;
@@ -42,11 +42,11 @@ class SubscriptionServiceImplTest {
     private static final long USER_ID = 202L;
 
     @Mock private AdminAuthorizationService authorizationService;
-    @Mock private SubscriptionRepository subscriptionRepository;
     @Mock private VpnAccessRepository accessRepository;
     @Mock private VpnProvider vpnProvider;
-    @Mock private SubscriptionMapper subscriptionMapper;
     @Mock private SubscriptionTransactionService transactionService;
+    @Mock private TelegramUserIdResolver userIdResolver;
+    @Mock private CurrentSubscriptionQuery currentSubscriptionQuery;
 
     private SubscriptionServiceImpl service;
 
@@ -54,11 +54,11 @@ class SubscriptionServiceImplTest {
     void setUp() {
         service = new SubscriptionServiceImpl(
                 authorizationService,
-                subscriptionRepository,
                 accessRepository,
                 vpnProvider,
-                subscriptionMapper,
                 transactionService,
+                userIdResolver,
+                currentSubscriptionQuery,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

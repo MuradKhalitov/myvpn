@@ -34,13 +34,13 @@ class VpnDeliveryPostgresIntegrationTest {
     @Container static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16.3-alpine");
     @DynamicPropertySource static void database(DynamicPropertyRegistry r) { r.add("spring.datasource.url", POSTGRES::getJdbcUrl); r.add("spring.datasource.username", POSTGRES::getUsername); r.add("spring.datasource.password", POSTGRES::getPassword); }
     @Autowired VpnDeliveryTransactionService transactions; @Autowired VpnDeliveryRepository deliveries;
-    @Autowired TelegramUserRepository users; @Autowired VpnTariffRepository tariffs; @Autowired SubscriptionRepository subscriptions;
+    @Autowired TelegramUserRepository users; @Autowired AccountRepository accounts; @Autowired VpnTariffRepository tariffs; @Autowired SubscriptionRepository subscriptions;
     @Autowired VpnAccessRepository accesses; @Autowired PaymentOrderRepository orders; @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbc;
     @Autowired VpnDeliveryProperties properties;
     private long nextTelegramId = 9001L;
 
-    @BeforeEach void clean() { deliveries.deleteAll(); orders.deleteAll(); accesses.deleteAll(); subscriptions.deleteAll(); users.deleteAll(); tariffs.deleteAll(); }
+    @BeforeEach void clean() { deliveries.deleteAll(); orders.deleteAll(); accesses.deleteAll(); subscriptions.deleteAll(); users.deleteAll(); accounts.deleteAll(); tariffs.deleteAll(); }
 
     @Test void lastAttemptCrashIsTerminalizedAfterLeaseExpiryAndCannotBeClaimedAgain() {
         VpnDelivery delivery = seed().delivery();
@@ -163,7 +163,7 @@ class VpnDeliveryPostgresIntegrationTest {
         assertThat(reread.getGeneration()).isEqualTo(current.generation()); assertThat(reread.getDeliveredAt()).isNull();
 
         Seed ownedSeed = seed(); VpnDelivery owned = ownedSeed.delivery(); ClaimedVpnDelivery claim = transactions.claim(NOW, 10).stream().filter(c -> c.deliveryId().equals(owned.getId())).findFirst().orElseThrow();
-        TelegramUser other = users.save(TelegramUser.builder().id(UUID.randomUUID()).telegramId(9901L).chatId(9901L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
+        TelegramUser other = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(accounts, users, TelegramUser.builder().id(UUID.randomUUID()).telegramId(9901L).chatId(9901L).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
         jdbc.update("update subscriptions set user_id=? where id=?", other.getId(), ownedSeed.subscription().getId());
         assertThat(transactions.delivered(claim, 11L, NOW.plusSeconds(1))).isTrue(); entityManager.clear();
         assertThat(deliveries.findById(owned.getId()).orElseThrow().getDeliveredAt()).isNull();
@@ -284,7 +284,7 @@ class VpnDeliveryPostgresIntegrationTest {
 
     Seed seed() {
         long telegramId = nextTelegramId++;
-        TelegramUser user = users.save(TelegramUser.builder().id(UUID.randomUUID()).telegramId(telegramId).chatId(telegramId).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
+        TelegramUser user = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(accounts, users, TelegramUser.builder().id(UUID.randomUUID()).telegramId(telegramId).chatId(telegramId).role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
         VpnTariff tariff = tariffs.findAll().stream().findFirst().orElseGet(() -> tariffs.save(VpnTariff.builder().id(UUID.randomUUID()).code("T" + UUID.randomUUID().toString().substring(0, 6)).name("Test").durationDays(30).price(BigDecimal.ONE).currency("RUB").active(true).createdAt(NOW).updatedAt(NOW).build()));
         Subscription subscription = subscriptions.save(Subscription.builder().id(UUID.randomUUID()).user(user).tariff(tariff).status(SubscriptionStatus.ACTIVE).startsAt(NOW).expiresAt(NOW.plus(Duration.ofDays(30))).activatedByTelegramId(user.getTelegramId()).activatedAt(NOW).createdAt(NOW).updatedAt(NOW).build());
         VpnAccess access = accesses.save(VpnAccess.builder().id(UUID.randomUUID()).subscription(subscription).providerName("FAKE").externalAccessId(UUID.randomUUID().toString()).configurationData("private-configuration").status(VpnAccessStatus.ACTIVE).issuedAt(NOW).createdAt(NOW).updatedAt(NOW).build());

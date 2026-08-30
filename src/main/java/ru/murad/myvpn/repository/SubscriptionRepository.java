@@ -21,6 +21,13 @@ public interface SubscriptionRepository extends JpaRepository<Subscription, UUID
             SubscriptionStatus status
     );
 
+    @EntityGraph(attributePaths = "tariff")
+    Optional<Subscription> findFirstByUserIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
+            UUID userId,
+            SubscriptionStatus status,
+            Instant now
+    );
+
     boolean existsByUserIdAndStatus(UUID userId, SubscriptionStatus status);
 
     List<Subscription> findAllByStatus(SubscriptionStatus status);

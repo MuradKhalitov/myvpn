@@ -72,6 +72,7 @@ class PaymentOrderRepositoryIntegrationTest {
     @Autowired private PaymentOrderRepository paymentOrderRepository;
     @Autowired private SubscriptionRepository subscriptionRepository;
     @Autowired private TelegramUserRepository userRepository;
+    @Autowired private AccountRepository accountRepository;
     @Autowired private VpnTariffRepository tariffRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private EntityManagerFactory entityManagerFactory;
@@ -84,6 +85,7 @@ class PaymentOrderRepositoryIntegrationTest {
     void cleanDatabase() {
         paymentOrderRepository.deleteAll();
         userRepository.deleteAll();
+        accountRepository.deleteAll();
     }
 
     @Test
@@ -686,7 +688,8 @@ class PaymentOrderRepositoryIntegrationTest {
     }
 
     private TelegramUser user(long telegramId) {
-        return userRepository.saveAndFlush(TelegramUser.builder()
+        return ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accountRepository, userRepository, TelegramUser.builder()
                 .id(UUID.randomUUID())
                 .telegramId(telegramId)
                 .chatId(telegramId)

@@ -35,6 +35,7 @@ import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.UserRole;
 import ru.murad.myvpn.model.VpnTariff;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnTariffRepository;
 import ru.murad.myvpn.service.FakePaymentRecoveryService;
@@ -88,6 +89,7 @@ class FakePaymentRestartRecoveryIntegrationTest {
     }
 
     @Autowired TelegramUserRepository userRepository;
+    @Autowired AccountRepository accountRepository;
     @Autowired VpnTariffRepository tariffRepository;
     @Autowired PaymentOrderRepository orderRepository;
     @Autowired PaymentVerificationTransactionService verificationTransactions;
@@ -110,6 +112,7 @@ class FakePaymentRestartRecoveryIntegrationTest {
     void clean() {
         orderRepository.deleteAll();
         userRepository.deleteAll();
+        accountRepository.deleteAll();
         tariffRepository.deleteAll();
     }
 
@@ -320,7 +323,8 @@ class FakePaymentRestartRecoveryIntegrationTest {
     }
 
     private Fixture fixture(long telegramId, FakePaymentProvider provider) {
-        TelegramUser user = userRepository.saveAndFlush(TelegramUser.builder()
+        TelegramUser user = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accountRepository, userRepository, TelegramUser.builder()
                 .id(UUID.randomUUID()).telegramId(telegramId).chatId(telegramId)
                 .role(UserRole.USER).createdAt(NOW).updatedAt(NOW).build());
         VpnTariff tariff = tariffRepository.saveAndFlush(VpnTariff.builder()

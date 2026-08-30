@@ -41,6 +41,7 @@ class SubscriptionRepositoryIntegrationTest {
     }
 
     @Autowired private TelegramUserRepository userRepository;
+    @Autowired private AccountRepository accountRepository;
     @Autowired private VpnTariffRepository tariffRepository;
     @Autowired private SubscriptionRepository subscriptionRepository;
     @Autowired private VpnAccessRepository accessRepository;
@@ -48,7 +49,8 @@ class SubscriptionRepositoryIntegrationTest {
     @Test
     void shouldPersistAndFindCurrentSubscriptionWithVpnAccess() {
         Instant now = Instant.parse("2026-07-24T10:00:00Z");
-        TelegramUser user = userRepository.save(TelegramUser.builder()
+        TelegramUser user = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accountRepository, userRepository, TelegramUser.builder()
                 .id(UUID.randomUUID())
                 .telegramId(5001L)
                 .chatId(5001L)

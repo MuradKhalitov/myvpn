@@ -40,6 +40,7 @@ import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.UserRole;
 import ru.murad.myvpn.model.VpnTariff;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnTariffRepository;
 import ru.murad.myvpn.service.ProviderPaymentValidator;
@@ -117,6 +118,7 @@ class PaymentVerificationTransactionServiceIntegrationTest {
     @Autowired private ProviderPaymentValidator providerPaymentValidator;
     @Autowired private PaymentOrderRepository orderRepository;
     @Autowired private TelegramUserRepository userRepository;
+    @Autowired private AccountRepository accountRepository;
     @Autowired private VpnTariffRepository tariffRepository;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private EntityManager entityManager;
@@ -127,6 +129,7 @@ class PaymentVerificationTransactionServiceIntegrationTest {
     void cleanDatabase() {
         orderRepository.deleteAll();
         userRepository.deleteAll();
+        accountRepository.deleteAll();
         entityManager.clear();
     }
 
@@ -1159,7 +1162,8 @@ class PaymentVerificationTransactionServiceIntegrationTest {
     }
 
     private TelegramUser user(long telegramId) {
-        return userRepository.saveAndFlush(TelegramUser.builder().id(UUID.randomUUID())
+        return ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accountRepository, userRepository, TelegramUser.builder().id(UUID.randomUUID())
                 .telegramId(telegramId).chatId(telegramId).role(UserRole.USER)
                 .createdAt(NOW).updatedAt(NOW).build());
     }

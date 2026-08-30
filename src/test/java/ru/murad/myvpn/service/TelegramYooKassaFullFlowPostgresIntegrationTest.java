@@ -27,6 +27,7 @@ import ru.murad.myvpn.model.VpnAccessStatus;
 import ru.murad.myvpn.model.VpnDeliveryStatus;
 import ru.murad.myvpn.model.VpnTariff;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
@@ -92,6 +93,7 @@ class TelegramYooKassaFullFlowPostgresIntegrationTest {
     @Autowired VpnAccessRepository accesses;
     @Autowired VpnDeliveryRepository deliveries;
     @Autowired TelegramUserRepository users;
+    @Autowired AccountRepository accounts;
     @Autowired VpnTariffRepository tariffs;
     @Autowired EntityManager entityManager;
 
@@ -102,6 +104,7 @@ class TelegramYooKassaFullFlowPostgresIntegrationTest {
         accesses.deleteAll();
         subscriptions.deleteAll();
         users.deleteAll();
+        accounts.deleteAll();
         tariffs.deleteAll();
         reset(telegramPaymentGateway, vpnDeliveryGateway);
         deliveryService = new VpnDeliveryServiceImpl(
@@ -112,7 +115,8 @@ class TelegramYooKassaFullFlowPostgresIntegrationTest {
     @Test
     void telegramInvoiceToActivationDeliveryAndExtensionIsEndToEndIdempotent() {
         Instant fixtureNow = Instant.now();
-        TelegramUser user = users.saveAndFlush(TelegramUser.builder()
+        TelegramUser user = ru.murad.myvpn.support.AccountTestData.saveTelegramUser(
+                accounts, users, TelegramUser.builder()
                 .id(UUID.randomUUID())
                 .telegramId(TELEGRAM_ID)
                 .chatId(CHAT_ID)
