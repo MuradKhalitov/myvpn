@@ -25,7 +25,8 @@ public class SecurityConfiguration {
                         .pathMatchers(HttpMethod.POST,
                                 "/api/v1/auth/otp/request",
                                 "/api/v1/auth/otp/verify",
-                                "/api/v1/auth/refresh").permitAll()
+                                "/api/v1/auth/refresh",
+                                "/api/v1/device/register").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer.jwt(jwt -> { }))
                 .build();

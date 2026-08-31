@@ -141,3 +141,7 @@ auth:
   refresh:
     ttl: ${AUTH_REFRESH_TTL:30d}
     pepper: ${AUTH_REFRESH_PEPPER:}
+
+security:
+  device:
+    secret-pepper: ${SECURITY_DEVICE_SECRET_PEPPER:}

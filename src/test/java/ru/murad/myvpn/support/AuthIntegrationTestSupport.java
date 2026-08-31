@@ -15,6 +15,7 @@ import ru.murad.myvpn.repository.AccountIdentityRepository;
 import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.AuthSessionRepository;
 import ru.murad.myvpn.repository.EmailOtpChallengeRepository;
+import ru.murad.myvpn.repository.DeviceCredentialRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
 
 import java.security.KeyPair;
@@ -43,6 +44,7 @@ public abstract class AuthIntegrationTestSupport {
         registry.add("auth.email-from", () -> "no-reply@example.test");
         registry.add("auth.otp.pepper", () -> "test-only-otp-pepper-at-least-32-bytes");
         registry.add("auth.refresh.pepper", () -> "test-only-refresh-pepper-at-least-32-bytes");
+        registry.add("security.device.secret-pepper", () -> "test-only-device-pepper-at-least-32-bytes");
         registry.add("auth.jwt.private-key-base64", () -> Base64.getEncoder()
                 .encodeToString(KEY_PAIR.getPrivate().getEncoded()));
         registry.add("auth.jwt.public-key-base64", () -> Base64.getEncoder()
@@ -58,6 +60,9 @@ public abstract class AuthIntegrationTestSupport {
 
     @Autowired
     protected EmailOtpChallengeRepository challengeRepository;
+
+    @Autowired
+    protected DeviceCredentialRepository deviceCredentialRepository;
 
     @Autowired
     protected AuthSessionRepository sessionRepository;
@@ -78,6 +83,7 @@ public abstract class AuthIntegrationTestSupport {
     void cleanAuthData() {
         sessionRepository.deleteAll();
         challengeRepository.deleteAll();
+        deviceCredentialRepository.deleteAll();
         identityRepository.deleteAll();
         telegramUserRepository.deleteAll();
         accountRepository.deleteAll();

@@ -23,6 +23,7 @@ import ru.murad.myvpn.application.auth.OtpCodeGenerator;
 import ru.murad.myvpn.application.auth.OtpHashService;
 import ru.murad.myvpn.application.auth.RefreshTokenGenerator;
 import ru.murad.myvpn.application.auth.RefreshTokenHashService;
+import ru.murad.myvpn.application.auth.DeviceSecretHashService;
 
 import java.security.KeyFactory;
 import java.security.SecureRandom;
@@ -62,6 +63,10 @@ public class AuthConfiguration {
     public RefreshTokenHashService refreshTokenHashService(AuthProperties properties) {
         validate(properties);
         return new RefreshTokenHashService(properties.refresh().pepper());
+    }
+
+    @Bean public DeviceSecretHashService deviceSecretHashService(DeviceSecurityProperties properties) {
+        requireText(properties.secretPepper(), "security.device.secret-pepper"); return new DeviceSecretHashService(properties.secretPepper());
     }
 
     @Bean

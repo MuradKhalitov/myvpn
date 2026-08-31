@@ -31,3 +31,5 @@ databaseChangeLog:
       file: db/changelog/changes/015-account-scoped-vpn-accesses.yaml
   - include:
       file: db/changelog/changes/016-add-vpn-provider-client-key.yaml
+  - include:
+      file: db/changelog/changes/017-add-device-identities.yaml
