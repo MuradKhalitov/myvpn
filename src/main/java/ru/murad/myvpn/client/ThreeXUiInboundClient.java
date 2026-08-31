@@ -208,6 +208,11 @@ public class ThreeXUiInboundClient {
                 null, "delete client", budget);
     }
 
+    public void resetClientTraffic(String providerClientKey, ThreeXUiRequestBudget budget) {
+        mutate(urlFactory.resetClientTraffic(properties.inboundId(), providerClientKey), null,
+                "reset client traffic", budget);
+    }
+
     public String serializeSettings(ThreeXUiInboundSettings settings) {
         try {
             return objectMapper.writeValueAsString(settings);

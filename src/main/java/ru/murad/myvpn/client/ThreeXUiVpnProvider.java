@@ -88,7 +88,8 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                 ? request.subscriptionId().toString() : request.stableExternalAccessId();
         long expectedExpiry = request.expiresAt().toEpochMilli();
         ThreeXUiVlessClient client = ThreeXUiVlessClient.create(
-                clientUuid, EMAIL_PREFIX + clientUuid, expectedExpiry);
+                clientUuid, request.providerClientKey() == null ? EMAIL_PREFIX + clientUuid
+                        : request.providerClientKey(), expectedExpiry);
         boolean reconciliationStarted = false;
         for (int attempt = 1; attempt <= properties.maxMutationAttempts(); attempt++) {
             boolean mutationAttempted = false;
@@ -228,6 +229,12 @@ public class ThreeXUiVpnProvider implements VpnProvider {
 
     @Override
     public void applyTrafficPolicy(String externalAccessId, VpnTrafficPolicy policy) {
+        applyTrafficPolicy(externalAccessId, null, policy);
+    }
+
+    @Override
+    public void applyTrafficPolicy(String externalAccessId, String providerClientKey,
+            VpnTrafficPolicy policy) {
         ThreeXUiRequestBudget budget = new ThreeXUiRequestBudget(properties.maxRequestsPerOperation());
         for (int attempt = 1; attempt <= properties.maxMutationAttempts(); attempt++) {
             try {
@@ -235,23 +242,30 @@ public class ThreeXUiVpnProvider implements VpnProvider {
                 validateConfiguredInbound(before);
                 ThreeXUiVlessClient client = findClient(before, externalAccessId)
                         .orElseThrow(() -> new ThreeXUiNotFoundException("traffic policy client"));
-                if (java.util.Objects.equals(client.totalGB(), policy.totalGbValue())) return;
-                budget.reserveReconciliation();
-                inboundClient.updateClient(externalAccessId,
-                        inboundClient.prepareTrafficPolicyUpdateRequest(before, externalAccessId,
-                                policy.totalGbValue()), budget);
-                ThreeXUiInboundResponse after = inboundClient.getInboundForReconciliation(budget);
-                validateConfiguredInbound(after);
-                boolean applied = findClient(after, externalAccessId)
-                        .map(value -> java.util.Objects.equals(value.totalGB(), policy.totalGbValue()))
-                        .orElse(false);
-                if (applied && inboundClient.otherClientsUnchanged(before, after, externalAccessId)) return;
+                if (!java.util.Objects.equals(client.totalGB(), policy.totalGbValue())) {
+                    budget.reserveReconciliation();
+                    inboundClient.updateClient(externalAccessId,
+                            inboundClient.prepareTrafficPolicyUpdateRequest(before, externalAccessId,
+                                    policy.totalGbValue()), budget);
+                    ThreeXUiInboundResponse after = inboundClient.getInboundForReconciliation(budget);
+                    validateConfiguredInbound(after);
+                    boolean applied = findClient(after, externalAccessId)
+                            .map(value -> java.util.Objects.equals(value.totalGB(), policy.totalGbValue()))
+                            .orElse(false);
+                    if (!applied || !inboundClient.otherClientsUnchanged(before, after, externalAccessId)) continue;
+                }
+                if (policy.unlimited()) return;
+                if (providerClientKey == null || providerClientKey.isBlank()) {
+                    throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                            "3x-ui traffic reset key is unavailable");
+                }
+                inboundClient.resetClientTraffic(providerClientKey, budget);
+                return;
             } catch (ThreeXUiRetryableException exception) {
                 if (attempt == properties.maxMutationAttempts()) throw new ThreeXUiUncertainException();
                 inboundClient.pause(attempt);
                 continue;
             }
-            if (attempt < properties.maxMutationAttempts()) inboundClient.pause(attempt);
         }
         throw new ThreeXUiUncertainException();
     }

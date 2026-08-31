@@ -27,7 +27,7 @@ class VpnTrafficPolicyServiceTest {
         VpnTrafficPolicyCandidate c = candidate(VpnEntitlement.FREE, 3); when(transactions.due(now)).thenReturn(List.of(c));
         when(transactions.complete(c.accessId(), 3, now)).thenReturn(true);
         service.reconcileDuePolicies();
-        verify(provider).applyTrafficPolicy(eq("external"), eq(VpnTrafficPolicy.limited(5L * 1024 * 1024 * 1024)));
+        verify(provider).applyTrafficPolicy(eq("external"), eq("acc_key"), eq(VpnTrafficPolicy.limited(5L * 1024 * 1024 * 1024)));
         verify(transactions).complete(c.accessId(), 3, now); verify(transactions, never()).retry(any(), anyLong(), any());
     }
 
@@ -35,12 +35,12 @@ class VpnTrafficPolicyServiceTest {
         VpnTrafficPolicyCandidate c = candidate(VpnEntitlement.PREMIUM, 4); when(transactions.due(now)).thenReturn(List.of(c));
         when(transactions.complete(c.accessId(), 4, now)).thenReturn(true);
         service.reconcileDuePolicies();
-        verify(provider).applyTrafficPolicy("external", VpnTrafficPolicy.unlimited(0));
+        verify(provider).applyTrafficPolicy("external", "acc_key", VpnTrafficPolicy.unlimited(0));
     }
 
     @Test void providerFailureSchedulesRetryAndDoesNotMarkApplied() {
         VpnTrafficPolicyCandidate c = candidate(VpnEntitlement.FREE, 2); when(transactions.due(now)).thenReturn(List.of(c));
-        doThrow(new RuntimeException("timeout")).when(provider).applyTrafficPolicy(any(), any());
+        doThrow(new RuntimeException("timeout")).when(provider).applyTrafficPolicy(any(), any(), any());
         when(transactions.retry(c.accessId(), 2, now)).thenReturn(true);
         service.reconcileDuePolicies();
         verify(transactions, never()).complete(any(), anyLong(), any()); verify(transactions).retry(c.accessId(), 2, now);
@@ -57,10 +57,10 @@ class VpnTrafficPolicyServiceTest {
         VpnTrafficPolicyCandidate c = candidate(VpnEntitlement.FREE, 5); when(transactions.due(now)).thenReturn(List.of(c));
         when(transactions.complete(c.accessId(), 5, now)).thenReturn(true);
         service.reconcileDuePolicies(); service.reconcileDuePolicies();
-        verify(provider, times(2)).applyTrafficPolicy("external", VpnTrafficPolicy.limited(5L * 1024 * 1024 * 1024));
+        verify(provider, times(2)).applyTrafficPolicy("external", "acc_key", VpnTrafficPolicy.limited(5L * 1024 * 1024 * 1024));
     }
 
     private VpnTrafficPolicyCandidate candidate(VpnEntitlement entitlement, long generation) {
-        return new VpnTrafficPolicyCandidate(UUID.randomUUID(), "external", entitlement, generation);
+        return new VpnTrafficPolicyCandidate(UUID.randomUUID(), "external", "acc_key", entitlement, generation);
     }
 }

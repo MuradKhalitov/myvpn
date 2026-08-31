@@ -32,6 +32,7 @@ public class AccountVpnAccessTransactionService {
             return accesses.save(VpnAccess.builder().id(UUID.randomUUID())
                     .account(entityManager.getReference(Account.class, accountId))
                     .providerName(providerName).externalAccessId(accountId.toString())
+                    .providerClientKey("acc_" + accountId)
                     .status(VpnAccessStatus.PROVISIONING).issuedAt(start).createdAt(start).updatedAt(start)
                     .desiredEntitlement(VpnEntitlement.FREE).policyStatus(VpnPolicyStatus.PENDING)
                     .policyGeneration(1).nextPolicyAttemptAt(start)

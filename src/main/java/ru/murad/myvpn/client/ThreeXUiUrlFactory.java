@@ -8,6 +8,8 @@ import ru.murad.myvpn.exception.ThreeXUiException;
 
 import java.net.URI;
 import java.util.Locale;
+import java.nio.charset.StandardCharsets;
+import org.springframework.web.util.UriUtils;
 
 @Component
 @ConditionalOnProperty(name = "vpn.provider.type", havingValue = "3x-ui")
@@ -65,6 +67,11 @@ public class ThreeXUiUrlFactory {
 
     public URI deleteClient(int inboundId, String clientUuid) {
         return uri("/panel/api/inbounds/" + inboundId + "/delClient/" + clientUuid);
+    }
+
+    public URI resetClientTraffic(int inboundId, String providerClientKey) {
+        return uri("/panel/api/inbounds/" + inboundId + "/resetClientTraffic/"
+                + UriUtils.encodePathSegment(providerClientKey, StandardCharsets.UTF_8));
     }
 
     private URI uri(String path) {

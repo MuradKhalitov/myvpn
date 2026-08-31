@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 016-add-vpn-provider-client-key
+      author: myvpn
+      changes:
+        - addColumn:
+            tableName: vpn_accesses
+            columns:
+              - column: { name: provider_client_key, type: varchar(96) }
+      rollback:
+        - dropColumn: { tableName: vpn_accesses, columnName: provider_client_key }

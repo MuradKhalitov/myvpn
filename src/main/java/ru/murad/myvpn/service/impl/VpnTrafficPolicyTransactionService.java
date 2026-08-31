@@ -23,8 +23,9 @@ public class VpnTrafficPolicyTransactionService {
     public List<VpnTrafficPolicyCandidate> due(Instant now) {
         return accesses.findTop50ByPolicyStatusInAndNextPolicyAttemptAtLessThanEqualOrderByUpdatedAt(
                         List.of(VpnPolicyStatus.PENDING, VpnPolicyStatus.RETRY_REQUIRED), now)
-                .stream().filter(access -> access.getStatus() != ru.murad.myvpn.model.VpnAccessStatus.REVOKED)
-                .map(access -> new VpnTrafficPolicyCandidate(access.getId(), access.getExternalAccessId(),
+                .stream().filter(access -> access.getStatus() != ru.murad.myvpn.model.VpnAccessStatus.REVOKED
+                        && access.getProviderClientKey() != null)
+                .map(access -> new VpnTrafficPolicyCandidate(access.getId(), access.getExternalAccessId(), access.getProviderClientKey(),
                         access.getDesiredEntitlement(), access.getPolicyGeneration())).toList();
     }
 
@@ -33,7 +34,7 @@ public class VpnTrafficPolicyTransactionService {
             Instant quotaStart, Instant quotaEnd, Instant now) {
         return accesses.findByAccountId(accountId).map(access -> {
             access.requestPolicy(entitlement, quotaStart, quotaEnd, now);
-            return new VpnTrafficPolicyCandidate(access.getId(), access.getExternalAccessId(),
+            return new VpnTrafficPolicyCandidate(access.getId(), access.getExternalAccessId(), access.getProviderClientKey(),
                     access.getDesiredEntitlement(), access.getPolicyGeneration());
         });
     }

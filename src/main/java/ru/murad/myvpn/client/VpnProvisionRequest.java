@@ -7,12 +7,16 @@ public record VpnProvisionRequest(
         UUID subscriptionId,
         long telegramId,
         Instant expiresAt,
-        String stableExternalAccessId
+        String stableExternalAccessId,
+        String providerClientKey
 ) {
 
     public VpnProvisionRequest(UUID subscriptionId, long telegramId, Instant expiresAt) {
-        this(subscriptionId, telegramId, expiresAt, null);
+        this(subscriptionId, telegramId, expiresAt, null, null);
     }
+
+    public VpnProvisionRequest(UUID subscriptionId, long telegramId, Instant expiresAt,
+            String stableExternalAccessId) { this(subscriptionId, telegramId, expiresAt, stableExternalAccessId, null); }
 
     @Override
     public String toString() {

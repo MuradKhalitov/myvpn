@@ -34,7 +34,7 @@ public class VpnTrafficPolicyServiceImpl implements VpnTrafficPolicyService {
         int applied = 0;
         for (VpnTrafficPolicyCandidate candidate : transactions.due(now)) {
             try {
-                provider.applyTrafficPolicy(candidate.externalAccessId(), policy(candidate.entitlement()));
+                provider.applyTrafficPolicy(candidate.externalAccessId(), candidate.providerClientKey(), policy(candidate.entitlement()));
                 if (transactions.complete(candidate.accessId(), candidate.generation(), now)) applied++;
                 else log.info("Stale VPN traffic policy result ignored accessId={} generation={}",
                         candidate.accessId(), candidate.generation());

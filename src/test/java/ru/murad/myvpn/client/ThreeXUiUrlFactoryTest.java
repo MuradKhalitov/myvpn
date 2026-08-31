@@ -46,6 +46,14 @@ class ThreeXUiUrlFactoryTest {
                 .isEqualTo("http");
     }
 
+    @Test
+    void shouldBuildEncodedResetClientTrafficEndpoint() {
+        ThreeXUiUrlFactory factory = new ThreeXUiUrlFactory(
+                properties(URI.create("https://test.invalid"), "/hidden"));
+        assertThat(factory.resetClientTraffic(9, "acc_key /+").toString())
+                .isEqualTo("https://test.invalid/hidden/panel/api/inbounds/9/resetClientTraffic/acc_key%20%2F+");
+    }
+
     private ThreeXUiProperties properties(URI baseUrl, String webPath) {
         return new ThreeXUiProperties(
                 baseUrl, webPath, "user", "password", 42,

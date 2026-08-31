@@ -23,7 +23,7 @@ class AccountVpnAccessServiceImplTest {
     @Test void provisionsFreeAccessWithoutSubscriptionAndPreservesStableExternalId() {
         Instant now = Instant.parse("2026-08-31T00:00:00Z"); UUID accountId = UUID.randomUUID(); UUID accessId = UUID.randomUUID();
         AccountVpnAccessTransactionService tx = mock(AccountVpnAccessTransactionService.class); VpnProvider provider = mock(VpnProvider.class);
-        VpnAccess access = VpnAccess.builder().id(accessId).externalAccessId(accountId.toString()).providerName("FAKE")
+        VpnAccess access = VpnAccess.builder().id(accessId).externalAccessId(accountId.toString()).providerClientKey("acc_" + accountId).providerName("FAKE")
                 .status(VpnAccessStatus.PROVISIONING).issuedAt(now).createdAt(now).updatedAt(now)
                 .desiredEntitlement(VpnEntitlement.FREE).policyStatus(VpnPolicyStatus.PENDING).policyGeneration(1).build();
         when(provider.providerName()).thenReturn("FAKE"); when(tx.reserveFree(eq(accountId), eq("FAKE"), any(), any())).thenReturn(access);
@@ -31,6 +31,6 @@ class AccountVpnAccessServiceImplTest {
         when(tx.completeFree(eq(accessId), eq(1L), eq("FAKE"), eq("config"), any())).thenReturn(true);
         UUID result = new AccountVpnAccessServiceImpl(tx, provider, new VpnTrafficProperties(10, 30, 0), Clock.fixed(now, ZoneOffset.UTC)).ensureFreeVpnAccess(accountId);
         assertThat(result).isEqualTo(accessId); assertThat(access.getSubscription()).isNull();
-        verify(provider).applyTrafficPolicy(accountId.toString(), VpnTrafficPolicy.limited(10));
+        verify(provider).applyTrafficPolicy(accountId.toString(), "acc_" + accountId, VpnTrafficPolicy.limited(10));
     }
 }

@@ -29,3 +29,5 @@ databaseChangeLog:
       file: db/changelog/changes/014-add-email-auth.yaml
   - include:
       file: db/changelog/changes/015-account-scoped-vpn-accesses.yaml
+  - include:
+      file: db/changelog/changes/016-add-vpn-provider-client-key.yaml

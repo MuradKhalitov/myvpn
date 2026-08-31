@@ -528,7 +528,7 @@ class SubscriptionConcurrencyIntegrationTest {
                         SubscriptionStatus.MANUAL_REVIEW_REQUIRED, 7202L);
                 connection.commit();
 
-                liquibase.rollback(8, new Contexts(), new LabelExpression());
+                liquibase.rollback(9, new Contexts(), new LabelExpression());
                 statement.execute("SET search_path TO " + schema);
                 assertThat(resultValue(statement, """
                         SELECT count(*)::text FROM information_schema.columns

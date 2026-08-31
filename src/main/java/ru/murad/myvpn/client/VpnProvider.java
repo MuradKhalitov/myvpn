@@ -16,5 +16,10 @@ public interface VpnProvider {
 
     void applyTrafficPolicy(String externalAccessId, VpnTrafficPolicy policy);
 
+    default void applyTrafficPolicy(String externalAccessId, String providerClientKey,
+            VpnTrafficPolicy policy) {
+        applyTrafficPolicy(externalAccessId, policy);
+    }
+
     void revoke(String externalAccessId);
 }

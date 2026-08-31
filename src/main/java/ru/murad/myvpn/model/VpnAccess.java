@@ -46,6 +46,9 @@ public class VpnAccess {
     @Column(name = "external_access_id", nullable = false, unique = true, length = 128)
     private String externalAccessId;
 
+    @Column(name = "provider_client_key", length = 96)
+    private String providerClientKey;
+
     @Column(name = "configuration_data", columnDefinition = "text")
     private String configurationData;
 

@@ -35,8 +35,8 @@ public class AccountVpnAccessServiceImpl implements AccountVpnAccessService {
                 && access.getAppliedEntitlement() == ru.murad.myvpn.model.VpnEntitlement.FREE) return access.getId();
         // This is deliberately account-only: the legacy request fields are not used for ownership.
         ProvisionedVpnAccess provisioned = provider.provision(new VpnProvisionRequest(accountId, 0L,
-                now.plus(3650, ChronoUnit.DAYS), access.getExternalAccessId()));
-        provider.applyTrafficPolicy(access.getExternalAccessId(),
+                now.plus(3650, ChronoUnit.DAYS), access.getExternalAccessId(), access.getProviderClientKey()));
+        provider.applyTrafficPolicy(access.getExternalAccessId(), access.getProviderClientKey(),
                 VpnTrafficPolicy.limited(traffic.trafficLimitBytes()));
         if (!transactions.completeFree(access.getId(), access.getPolicyGeneration(),
                 provisioned.providerName(), provisioned.configurationData(), clock.instant())) {
