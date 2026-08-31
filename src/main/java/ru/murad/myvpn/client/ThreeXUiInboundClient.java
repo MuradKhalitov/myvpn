@@ -115,6 +115,36 @@ public class ThreeXUiInboundClient {
         return prepareClientUpdateRequest(inbound, clientUuid, expiryTime, true);
     }
 
+    public ThreeXUiClientRequest prepareTrafficPolicyUpdateRequest(
+            ThreeXUiInboundResponse inbound, String clientUuid, long totalGb
+    ) {
+        try {
+            JsonNode settings = objectMapper.readTree(inbound.settings());
+            JsonNode clients = settings == null ? null : settings.get("clients");
+            if (!(clients instanceof ArrayNode clientsArray)) {
+                throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                        "Invalid 3x-ui inbound settings format");
+            }
+            ObjectNode target = null;
+            for (JsonNode candidate : clientsArray) {
+                if (candidate instanceof ObjectNode object
+                        && clientUuid.equals(object.path("id").asText(null))) {
+                    target = object.deepCopy();
+                    break;
+                }
+            }
+            if (target == null) throw new ThreeXUiNotFoundException("traffic policy client");
+            target.put("totalGB", totalGb);
+            ObjectNode updateSettings = objectMapper.createObjectNode();
+            updateSettings.set("clients", objectMapper.createArrayNode().add(target));
+            return new ThreeXUiClientRequest(properties.inboundId(),
+                    objectMapper.writeValueAsString(updateSettings));
+        } catch (JsonProcessingException exception) {
+            throw new ThreeXUiException(VpnProviderFailureCode.INVALID_PROVIDER_RESPONSE,
+                    "Invalid 3x-ui inbound settings format");
+        }
+    }
+
     private ThreeXUiClientRequest prepareClientUpdateRequest(
             ThreeXUiInboundResponse inbound,
             String clientUuid,

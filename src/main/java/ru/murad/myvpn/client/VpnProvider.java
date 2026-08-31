@@ -14,5 +14,7 @@ public interface VpnProvider {
 
     ProvisionedVpnAccess extend(VpnExtensionRequest request);
 
+    void applyTrafficPolicy(String externalAccessId, VpnTrafficPolicy policy);
+
     void revoke(String externalAccessId);
 }

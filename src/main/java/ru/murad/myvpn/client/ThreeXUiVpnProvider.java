@@ -226,6 +226,36 @@ public class ThreeXUiVpnProvider implements VpnProvider {
         throw new ThreeXUiException("3x-ui client extension was not confirmed");
     }
 
+    @Override
+    public void applyTrafficPolicy(String externalAccessId, VpnTrafficPolicy policy) {
+        ThreeXUiRequestBudget budget = new ThreeXUiRequestBudget(properties.maxRequestsPerOperation());
+        for (int attempt = 1; attempt <= properties.maxMutationAttempts(); attempt++) {
+            try {
+                ThreeXUiInboundResponse before = inboundClient.getInbound(budget);
+                validateConfiguredInbound(before);
+                ThreeXUiVlessClient client = findClient(before, externalAccessId)
+                        .orElseThrow(() -> new ThreeXUiNotFoundException("traffic policy client"));
+                if (java.util.Objects.equals(client.totalGB(), policy.totalGbValue())) return;
+                budget.reserveReconciliation();
+                inboundClient.updateClient(externalAccessId,
+                        inboundClient.prepareTrafficPolicyUpdateRequest(before, externalAccessId,
+                                policy.totalGbValue()), budget);
+                ThreeXUiInboundResponse after = inboundClient.getInboundForReconciliation(budget);
+                validateConfiguredInbound(after);
+                boolean applied = findClient(after, externalAccessId)
+                        .map(value -> java.util.Objects.equals(value.totalGB(), policy.totalGbValue()))
+                        .orElse(false);
+                if (applied && inboundClient.otherClientsUnchanged(before, after, externalAccessId)) return;
+            } catch (ThreeXUiRetryableException exception) {
+                if (attempt == properties.maxMutationAttempts()) throw new ThreeXUiUncertainException();
+                inboundClient.pause(attempt);
+                continue;
+            }
+            if (attempt < properties.maxMutationAttempts()) inboundClient.pause(attempt);
+        }
+        throw new ThreeXUiUncertainException();
+    }
+
     private ProvisionedVpnAccess extensionResult(ThreeXUiVlessClient client) {
         Metrics.counter("vpn_provider_operation_total", "provider", "3x_ui", "operation", "extend", "result", "success")
                 .increment();

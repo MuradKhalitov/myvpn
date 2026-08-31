@@ -55,7 +55,7 @@ class PaymentActivationMigrationIntegrationTest {
         try (Connection connection = dataSource.getConnection()) {
             Liquibase liquibase = new Liquibase("db/changelog/db.changelog-master.yaml",
                     new ClassLoaderResourceAccessor(), new JdbcConnection(connection));
-            liquibase.rollback(6, new Contexts(), new LabelExpression());
+            liquibase.rollback(7, new Contexts(), new LabelExpression());
             assertThat(columnExists("next_activation_at")).isFalse();
             assertThat(indexExists("idx_payment_orders_activation_queue")).isFalse();
             assertThat(columnExists("activation_completed_at")).isFalse();

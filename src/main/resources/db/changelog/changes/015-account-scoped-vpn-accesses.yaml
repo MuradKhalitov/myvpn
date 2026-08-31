@@ -1,0 +1,86 @@
+databaseChangeLog:
+  - changeSet:
+      id: 015-account-scoped-vpn-accesses
+      author: myvpn
+      changes:
+        - addColumn:
+            tableName: vpn_accesses
+            columns:
+              - column: { name: account_id, type: uuid }
+              - column: { name: desired_entitlement, type: varchar(16), defaultValue: FREE, constraints: { nullable: false } }
+              - column: { name: applied_entitlement, type: varchar(16) }
+              - column: { name: policy_generation, type: bigint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: policy_status, type: varchar(24), defaultValue: RETRY_REQUIRED, constraints: { nullable: false } }
+              - column: { name: next_policy_attempt_at, type: timestamp with time zone }
+              - column: { name: quota_period_started_at, type: timestamp with time zone }
+              - column: { name: quota_period_ends_at, type: timestamp with time zone }
+        - sql:
+            splitStatements: false
+            sql: >
+              UPDATE vpn_accesses access
+              SET account_id = subscription.user_id
+              FROM subscriptions subscription
+              WHERE access.subscription_id = subscription.id
+        - addNotNullConstraint:
+            tableName: vpn_accesses
+            columnName: account_id
+            columnDataType: uuid
+        - addForeignKeyConstraint:
+            baseTableName: vpn_accesses
+            baseColumnNames: account_id
+            referencedTableName: accounts
+            referencedColumnNames: id
+            constraintName: fk_vpn_accesses_account
+        - dropNotNullConstraint:
+            tableName: vpn_accesses
+            columnName: subscription_id
+            columnDataType: uuid
+        - sql:
+            sql: >
+              ALTER TABLE vpn_accesses
+              ADD CONSTRAINT chk_vpn_accesses_desired_entitlement
+              CHECK (desired_entitlement IN ('FREE', 'PREMIUM'))
+        - sql:
+            sql: >
+              ALTER TABLE vpn_accesses
+              ADD CONSTRAINT chk_vpn_accesses_applied_entitlement
+              CHECK (applied_entitlement IS NULL OR applied_entitlement IN ('FREE', 'PREMIUM'))
+        - sql:
+            sql: >
+              ALTER TABLE vpn_accesses
+              ADD CONSTRAINT chk_vpn_accesses_policy_status
+              CHECK (policy_status IN ('PENDING', 'APPLIED', 'RETRY_REQUIRED'))
+        # Compatibility safety net for legacy writers during a rolling deployment.
+        - sql:
+            splitStatements: false
+            sql: >
+              CREATE OR REPLACE FUNCTION vpn_accesses_fill_account_id()
+              RETURNS trigger AS $$
+              BEGIN
+                IF NEW.account_id IS NULL AND NEW.subscription_id IS NOT NULL THEN
+                  SELECT user_id INTO NEW.account_id FROM subscriptions WHERE id = NEW.subscription_id;
+                END IF;
+                RETURN NEW;
+              END;
+              $$ LANGUAGE plpgsql
+        - sql:
+            sql: >
+              CREATE TRIGGER trg_vpn_accesses_fill_account_id
+              BEFORE INSERT OR UPDATE OF subscription_id ON vpn_accesses
+              FOR EACH ROW EXECUTE FUNCTION vpn_accesses_fill_account_id()
+      rollback:
+        - sql: { sql: "DROP TRIGGER IF EXISTS trg_vpn_accesses_fill_account_id ON vpn_accesses" }
+        - sql: { sql: "DROP FUNCTION IF EXISTS vpn_accesses_fill_account_id()" }
+        - sql: { sql: "ALTER TABLE vpn_accesses DROP CONSTRAINT IF EXISTS chk_vpn_accesses_policy_status" }
+        - sql: { sql: "ALTER TABLE vpn_accesses DROP CONSTRAINT IF EXISTS chk_vpn_accesses_applied_entitlement" }
+        - sql: { sql: "ALTER TABLE vpn_accesses DROP CONSTRAINT IF EXISTS chk_vpn_accesses_desired_entitlement" }
+        - dropForeignKeyConstraint: { baseTableName: vpn_accesses, constraintName: fk_vpn_accesses_account }
+        - addNotNullConstraint: { tableName: vpn_accesses, columnName: subscription_id, columnDataType: uuid }
+        - dropColumn: { tableName: vpn_accesses, columnName: quota_period_ends_at }
+        - dropColumn: { tableName: vpn_accesses, columnName: quota_period_started_at }
+        - dropColumn: { tableName: vpn_accesses, columnName: next_policy_attempt_at }
+        - dropColumn: { tableName: vpn_accesses, columnName: policy_status }
+        - dropColumn: { tableName: vpn_accesses, columnName: policy_generation }
+        - dropColumn: { tableName: vpn_accesses, columnName: applied_entitlement }
+        - dropColumn: { tableName: vpn_accesses, columnName: desired_entitlement }
+        - dropColumn: { tableName: vpn_accesses, columnName: account_id }

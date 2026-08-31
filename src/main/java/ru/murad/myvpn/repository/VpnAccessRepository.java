@@ -26,6 +26,13 @@ public interface VpnAccessRepository extends JpaRepository<VpnAccess, UUID> {
 
     Optional<VpnAccess> findBySubscriptionId(UUID subscriptionId);
 
+    Optional<VpnAccess> findByAccountId(UUID accountId);
+
+    Optional<VpnAccess> findFirstByAccountIdAndSubscriptionIsNull(UUID accountId);
+
+    List<VpnAccess> findTop50ByPolicyStatusInAndNextPolicyAttemptAtLessThanEqualOrderByUpdatedAt(
+            java.util.Collection<ru.murad.myvpn.model.VpnPolicyStatus> statuses, Instant now);
+
     List<VpnAccess> findAllByStatusAndRevokedAtLessThanEqualAndConfigurationDataIsNotNull(
             VpnAccessStatus status,
             Instant threshold

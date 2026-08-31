@@ -88,6 +88,11 @@ payment:
     max-attempts: ${PAYMENT_ACTIVATION_MAX_ATTEMPTS:5}
 
 vpn:
+  free:
+    traffic-limit-bytes: ${VPN_FREE_TRAFFIC_LIMIT_BYTES:5368709120}
+    quota-period-days: ${VPN_FREE_QUOTA_PERIOD_DAYS:30}
+    # 3x-ui's server-side meaning must be verified in staging; kept explicit.
+    premium-unlimited-total-gb: ${VPN_PREMIUM_UNLIMITED_TOTAL_GB:0}
   delivery:
     enabled: ${VPN_DELIVERY_ENABLED:false}
     batch-size: ${VPN_DELIVERY_BATCH_SIZE:10}

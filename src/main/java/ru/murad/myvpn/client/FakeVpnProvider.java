@@ -47,6 +47,11 @@ public class FakeVpnProvider implements VpnProvider {
     }
 
     @Override
+    public void applyTrafficPolicy(String externalAccessId, VpnTrafficPolicy policy) {
+        // The fake provider intentionally has no external state.
+    }
+
+    @Override
     public void revoke(String externalAccessId) {
         // The fake provider has no external state to revoke.
     }

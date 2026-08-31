@@ -151,7 +151,9 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                     .status(SubscriptionStatus.ACTIVE).startsAt(now).expiresAt(p.targetExpiresAt())
                     .activatedByTelegramId(order.getUser().getTelegramId()).activatedAt(now).createdAt(now).updatedAt(now).build();
             subscriptions.save(subscription);
-            VpnAccess access = VpnAccess.builder().id(UUID.randomUUID()).subscription(subscription)
+            VpnAccess access = VpnAccess.builder().id(UUID.randomUUID())
+                    .account(entityManager.getReference(Account.class, order.getUser().getId()))
+                    .subscription(subscription)
                     .providerName(result.providerName()).externalAccessId(result.externalAccessId())
                     .configurationData(result.configurationData())
                     .status(VpnAccessStatus.ACTIVE).issuedAt(now).createdAt(now).updatedAt(now).build();

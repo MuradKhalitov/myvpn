@@ -1,11 +1,13 @@
 package ru.murad.myvpn.service.impl;
 
 import org.junit.jupiter.api.Test;
+import jakarta.persistence.EntityManager;
 import org.mockito.ArgumentCaptor;
 import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.mapper.SubscriptionMapper;
 import ru.murad.myvpn.model.Subscription;
 import ru.murad.myvpn.model.SubscriptionStatus;
+import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.VpnAccess;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.TelegramUserRepository;
@@ -35,10 +37,12 @@ class SubscriptionTransactionServiceImplTest {
                         mock(VpnTariffRepository.class),
                         subscriptions,
                         accesses,
-                        mapper);
+                        mapper,
+                        mock(EntityManager.class));
         UUID subscriptionId = UUID.randomUUID();
         Subscription subscription = Subscription.builder()
                 .id(subscriptionId)
+                .user(TelegramUser.builder().id(UUID.randomUUID()).build())
                 .status(SubscriptionStatus.PENDING)
                 .createdAt(Instant.EPOCH)
                 .updatedAt(Instant.EPOCH)

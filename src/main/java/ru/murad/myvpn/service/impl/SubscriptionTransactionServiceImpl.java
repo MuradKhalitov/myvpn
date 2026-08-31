@@ -3,6 +3,7 @@ package ru.murad.myvpn.service.impl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jakarta.persistence.EntityManager;
 import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.dto.ActivateSubscriptionRequest;
 import ru.murad.myvpn.dto.SubscriptionDto;
@@ -12,6 +13,7 @@ import ru.murad.myvpn.exception.VpnAccessNotFoundException;
 import ru.murad.myvpn.exception.VpnTariffNotFoundException;
 import ru.murad.myvpn.mapper.SubscriptionMapper;
 import ru.murad.myvpn.model.Subscription;
+import ru.murad.myvpn.model.Account;
 import ru.murad.myvpn.model.SubscriptionStatus;
 import ru.murad.myvpn.model.TelegramUser;
 import ru.murad.myvpn.model.VpnAccess;
@@ -41,6 +43,7 @@ public class SubscriptionTransactionServiceImpl
     private final SubscriptionRepository subscriptionRepository;
     private final VpnAccessRepository accessRepository;
     private final SubscriptionMapper subscriptionMapper;
+    private final EntityManager entityManager;
     private static final int RECOVERY_BATCH_SIZE = 20;
     private static final int MAX_RECOVERY_ATTEMPTS = 5;
     private static final long RECOVERY_LEASE_MINUTES = 2;
@@ -125,6 +128,7 @@ public class SubscriptionTransactionServiceImpl
         }
         VpnAccess access = VpnAccess.builder()
                 .id(UUID.randomUUID())
+                .account(entityManager.getReference(Account.class, subscription.getUser().getId()))
                 .subscription(subscription)
                 .providerName(provisioned.providerName())
                 .externalAccessId(provisioned.externalAccessId())
@@ -154,6 +158,7 @@ public class SubscriptionTransactionServiceImpl
         }
         VpnAccess access = VpnAccess.builder()
                 .id(UUID.randomUUID())
+                .account(entityManager.getReference(Account.class, subscription.getUser().getId()))
                 .subscription(subscription)
                 .providerName(provisioned.providerName())
                 .externalAccessId(provisioned.externalAccessId())
