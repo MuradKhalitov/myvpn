@@ -16,42 +16,27 @@ import org.springframework.data.jpa.repository.EntityGraph;
 
 public interface SubscriptionRepository extends JpaRepository<Subscription, UUID> {
 
-    Optional<Subscription> findFirstByUserIdAndStatusOrderByExpiresAtDesc(
-            UUID userId,
+    Optional<Subscription> findFirstByAccountIdAndStatusOrderByExpiresAtDesc(
+            UUID accountId,
             SubscriptionStatus status
     );
 
     @EntityGraph(attributePaths = "tariff")
-    Optional<Subscription> findFirstByUserIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
-            UUID userId,
+    Optional<Subscription> findFirstByAccountIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
+            UUID accountId,
             SubscriptionStatus status,
             Instant now
     );
 
-    boolean existsByUserIdAndStatus(UUID userId, SubscriptionStatus status);
+    boolean existsByAccountIdAndStatus(UUID accountId, SubscriptionStatus status);
 
     List<Subscription> findAllByStatus(SubscriptionStatus status);
 
-    List<Subscription> findAllByUserIdAndStatus(UUID userId, SubscriptionStatus status);
+    List<Subscription> findAllByAccountIdAndStatus(UUID accountId, SubscriptionStatus status);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select subscription from Subscription subscription where subscription.id = :id")
     Optional<Subscription> findByIdForUpdate(@Param("id") UUID id);
-
-    @EntityGraph(attributePaths = "user")
-    @Query("select subscription from Subscription subscription where subscription.id = :id")
-    Optional<Subscription> findByIdForDelivery(@Param("id") UUID id);
-
-    Optional<Subscription> findFirstByUserTelegramIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
-            long telegramId,
-            SubscriptionStatus status,
-            Instant now
-    );
-
-    Optional<Subscription> findFirstByUserTelegramIdAndStatusOrderByExpiresAtDesc(
-            long telegramId,
-            SubscriptionStatus status
-    );
 
     List<Subscription> findAllByStatusAndExpiresAtLessThanEqual(
             SubscriptionStatus status,

@@ -8,7 +8,6 @@ import ru.murad.myvpn.dto.*;
 import ru.murad.myvpn.exception.*;
 import ru.murad.myvpn.model.*;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
-import ru.murad.myvpn.repository.TelegramUserRepository;
 import ru.murad.myvpn.service.PaymentVerificationTransactionService;
 import java.time.*;
 import java.util.List;
@@ -16,14 +15,12 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class PaymentVerificationTransactionServiceImpl implements PaymentVerificationTransactionService {
-    private final TelegramUserRepository users;
     private final PaymentOrderRepository orders;
     private final EntityManager entityManager;
 
     @Override @Transactional
-    public PaymentVerificationPreparation prepare(long telegramId, Instant now, Duration interval) {
-        var user = users.findByTelegramId(telegramId).orElseThrow(() -> new TelegramUserNotFoundException(telegramId));
-        List<PaymentOrder> all = orders.findAllByUserOrderByCreatedAtDesc(user.getId());
+    public PaymentVerificationPreparation prepare(java.util.UUID accountId, Instant now, Duration interval) {
+        List<PaymentOrder> all = orders.findAllByAccountOrderByCreatedAtDesc(accountId);
         List<PaymentOrder> relevant = all.stream().filter(this::blocking).toList();
         if (relevant.size() > 1) return new PaymentVerificationPreparation(null,
                 new PaymentVerificationResult(PaymentVerificationOutcome.AMBIGUOUS_PAYMENT_STATE, null, null, null, null));
@@ -127,10 +124,10 @@ public class PaymentVerificationTransactionServiceImpl implements PaymentVerific
         if (p.getProviderPaymentId() == null) return result(p, PaymentVerificationOutcome.CHECKOUT_INCOMPLETE);
         return null;
     }
-    private PreparedPaymentVerification snapshot(PaymentOrder p) { return new PreparedPaymentVerification(p.getId(), p.getUser().getId(), p.getProvider(), p.getProviderPaymentId(), p.getAmount(), p.getCurrency(), p.getTariff().getId(), p.getTariffCodeSnapshot(), p.getTariffNameSnapshot(), p.getDurationDaysSnapshot(), p.getStatus(), p.getIdempotenceKey()); }
+    private PreparedPaymentVerification snapshot(PaymentOrder p) { return new PreparedPaymentVerification(p.getId(), p.getAccount().getId(), p.getProvider(), p.getProviderPaymentId(), p.getAmount(), p.getCurrency(), p.getTariff().getId(), p.getTariffCodeSnapshot(), p.getTariffNameSnapshot(), p.getDurationDaysSnapshot(), p.getStatus(), p.getIdempotenceKey()); }
     private PaymentVerificationResult result(PaymentOrder p, PaymentVerificationOutcome o) { return new PaymentVerificationResult(o, p.getStatus(), p.getActivationStatus(), p.getPaidAt(), p.getNextVerificationAt()); }
     private boolean snapshotMatches(PaymentOrder o, PreparedPaymentVerification e) {
-        return o.getId().equals(e.paymentOrderId()) && o.getUser().getId().equals(e.userId())
+        return o.getId().equals(e.paymentOrderId()) && o.getAccount().getId().equals(e.accountId())
                 && o.getProvider() == e.provider() && java.util.Objects.equals(o.getProviderPaymentId(), e.providerPaymentId())
                 && o.getAmount().compareTo(e.amount()) == 0 && o.getCurrency().equals(e.currency())
                 && o.getTariff().getId().equals(e.tariffId())

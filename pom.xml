@@ -15,13 +15,12 @@
     <artifactId>myvpn</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <name>MyVPN</name>
-    <description>Telegram bot for managing VPN subscriptions</description>
+    <description>Android-first backend for managing VPN subscriptions</description>
 
     <properties>
         <java.version>17</java.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <testcontainers.version>1.19.8</testcontainers.version>
-        <telegrambots.version>10.1.0</telegrambots.version>
     </properties>
 
     <dependencyManagement>
@@ -78,16 +77,6 @@
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
             <version>${mapstruct.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.telegram</groupId>
-            <artifactId>telegrambots-springboot-longpolling-starter</artifactId>
-            <version>${telegrambots.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.telegram</groupId>
-            <artifactId>telegrambots-client</artifactId>
-            <version>${telegrambots.version}</version>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

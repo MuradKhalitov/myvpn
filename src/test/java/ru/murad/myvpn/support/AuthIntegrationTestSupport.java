@@ -16,8 +16,6 @@ import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.AuthSessionRepository;
 import ru.murad.myvpn.repository.EmailOtpChallengeRepository;
 import ru.murad.myvpn.repository.DeviceCredentialRepository;
-import ru.murad.myvpn.repository.TelegramUserRepository;
-
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.util.Base64;
@@ -25,16 +23,9 @@ import java.util.Base64;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @ActiveProfiles("test")
 public abstract class AuthIntegrationTestSupport {
-
-    protected static final PostgreSQLContainer<?> POSTGRESQL =
-            new PostgreSQLContainer<>("postgres:16.3-alpine");
-
+    protected static final PostgreSQLContainer<?> POSTGRESQL = new PostgreSQLContainer<>("postgres:16.3-alpine");
     private static final KeyPair KEY_PAIR = generateKeyPair();
-
-    static {
-        POSTGRESQL.start();
-    }
-
+    static { POSTGRESQL.start(); }
     @DynamicPropertySource
     static void configure(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRESQL::getJdbcUrl);
@@ -45,57 +36,24 @@ public abstract class AuthIntegrationTestSupport {
         registry.add("auth.otp.pepper", () -> "test-only-otp-pepper-at-least-32-bytes");
         registry.add("auth.refresh.pepper", () -> "test-only-refresh-pepper-at-least-32-bytes");
         registry.add("security.device.secret-pepper", () -> "test-only-device-pepper-at-least-32-bytes");
-        registry.add("auth.jwt.private-key-base64", () -> Base64.getEncoder()
-                .encodeToString(KEY_PAIR.getPrivate().getEncoded()));
-        registry.add("auth.jwt.public-key-base64", () -> Base64.getEncoder()
-                .encodeToString(KEY_PAIR.getPublic().getEncoded()));
+        registry.add("auth.jwt.private-key-base64", () -> Base64.getEncoder().encodeToString(KEY_PAIR.getPrivate().getEncoded()));
+        registry.add("auth.jwt.public-key-base64", () -> Base64.getEncoder().encodeToString(KEY_PAIR.getPublic().getEncoded()));
         registry.add("management.health.mail.enabled", () -> "false");
     }
-
-    @MockBean
-    protected EmailSender emailSender;
-
-    @Autowired
-    protected WebTestClient webTestClient;
-
-    @Autowired
-    protected EmailOtpChallengeRepository challengeRepository;
-
-    @Autowired
-    protected DeviceCredentialRepository deviceCredentialRepository;
-
-    @Autowired
-    protected AuthSessionRepository sessionRepository;
-
-    @Autowired
-    protected AccountIdentityRepository identityRepository;
-
-    @Autowired
-    protected TelegramUserRepository telegramUserRepository;
-
-    @Autowired
-    protected AccountRepository accountRepository;
-
-    @Autowired
-    protected JwtDecoder jwtDecoder;
-
-    @BeforeEach
-    void cleanAuthData() {
-        sessionRepository.deleteAll();
-        challengeRepository.deleteAll();
-        deviceCredentialRepository.deleteAll();
-        identityRepository.deleteAll();
-        telegramUserRepository.deleteAll();
-        accountRepository.deleteAll();
+    @MockBean protected EmailSender emailSender;
+    @Autowired protected WebTestClient webTestClient;
+    @Autowired protected EmailOtpChallengeRepository challengeRepository;
+    @Autowired protected DeviceCredentialRepository deviceCredentialRepository;
+    @Autowired protected AuthSessionRepository sessionRepository;
+    @Autowired protected AccountIdentityRepository identityRepository;
+    @Autowired protected AccountRepository accountRepository;
+    @Autowired protected JwtDecoder jwtDecoder;
+    @BeforeEach void cleanAuthData() {
+        sessionRepository.deleteAll(); challengeRepository.deleteAll(); deviceCredentialRepository.deleteAll();
+        identityRepository.deleteAll(); accountRepository.deleteAll();
     }
-
     private static KeyPair generateKeyPair() {
-        try {
-            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-            generator.initialize(2048);
-            return generator.generateKeyPair();
-        } catch (Exception exception) {
-            throw new ExceptionInInitializerError(exception);
-        }
+        try { KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA"); generator.initialize(2048); return generator.generateKeyPair(); }
+        catch (Exception exception) { throw new ExceptionInInitializerError(exception); }
     }
 }

@@ -20,10 +20,6 @@ public interface VpnAccessRepository extends JpaRepository<VpnAccess, UUID> {
     @Query("select access from VpnAccess access where access.id = :id")
     Optional<VpnAccess> findByIdForUpdate(@Param("id") UUID id);
 
-    @EntityGraph(attributePaths = "subscription")
-    @Query("select access from VpnAccess access where access.id = :id")
-    Optional<VpnAccess> findByIdForDelivery(@Param("id") UUID id);
-
     Optional<VpnAccess> findBySubscriptionId(UUID subscriptionId);
 
     Optional<VpnAccess> findByAccountId(UUID accountId);

@@ -100,14 +100,14 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
         }
         Instant now = clock.instant();
         Instant target = vpnProvider.resolveProvisionTarget(
-                new VpnProvisionRequest(prepared.userId(), 0L, null,
+                new VpnProvisionRequest(prepared.accountId(), 0L, null,
                         prepared.stableExternalClientId()),
                 prepared.durationDays(), now);
         return transactions.fixProvisionTarget(prepared, target, now).orElse(null);
     }
 
     private void validatePreparedActivation(PreparedPaymentActivation prepared) {
-        if (prepared == null || prepared.action() == null || prepared.userId() == null
+        if (prepared == null || prepared.action() == null || prepared.accountId() == null
                 || prepared.stableExternalClientId() == null
                 || prepared.stableExternalClientId().isBlank()
                 || (prepared.action() == ru.murad.myvpn.service.PaymentActivationAction.EXTEND
@@ -123,14 +123,14 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
     }
 
     private ProviderCall buildProviderCall(PreparedPaymentActivation prepared) {
-        if (prepared == null || prepared.action() == null || prepared.userId() == null
+        if (prepared == null || prepared.action() == null || prepared.accountId() == null
                 || prepared.targetExpiresAt() == null || prepared.stableExternalClientId() == null
                 || prepared.stableExternalClientId().isBlank()) {
             throw new IllegalArgumentException("Prepared payment activation command is invalid");
         }
         return switch (prepared.action()) {
             case PROVISION -> {
-                VpnProvisionRequest request = new VpnProvisionRequest(prepared.userId(), 0L,
+                VpnProvisionRequest request = new VpnProvisionRequest(prepared.accountId(), 0L,
                         prepared.targetExpiresAt(), prepared.stableExternalClientId());
                 yield () -> vpnProvider.provision(request);
             }

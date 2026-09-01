@@ -152,4 +152,9 @@ public class VpnAccess {
         this.issuedAt = now;
         this.updatedAt = now;
     }
+
+    public void attachSubscription(Subscription subscription, Instant now) {
+        this.subscription = subscription;
+        this.updatedAt = now;
+    }
 }

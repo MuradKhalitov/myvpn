@@ -48,24 +48,12 @@ logging:
     org.springframework: INFO
     org.springframework.web.reactive.function.client: WARN
     reactor.netty.http.client: WARN
-    org.telegram: INFO
-
-telegram:
-  admin-ids: ${TELEGRAM_ADMIN_IDS:}
-  bot-token: ${TELEGRAM_BOT_TOKEN:}
 
 payment:
   provider: ${PAYMENT_PROVIDER:fake}
   pending-ttl: ${PAYMENT_PENDING_TTL:1h}
   return-url: ${PAYMENT_RETURN_URL:https://example.invalid/payment-return}
   allow-fake: ${PAYMENT_ALLOW_FAKE:false}
-  telegram:
-    provider-token: ${TELEGRAM_PAYMENT_PROVIDER_TOKEN:}
-    currency: RUB
-    pre-checkout-timeout: ${TELEGRAM_PAYMENT_PRE_CHECKOUT_TIMEOUT:9s}
-    receipt-enabled: ${TELEGRAM_PAYMENT_RECEIPT_ENABLED:false}
-    vat-code: ${TELEGRAM_PAYMENT_VAT_CODE:}
-    receipt-contact: ${TELEGRAM_PAYMENT_RECEIPT_CONTACT:}
   yookassa:
     base-url: ${YOOKASSA_BASE_URL:https://api.yookassa.ru/v3}
     shop-id: ${YOOKASSA_SHOP_ID:}
@@ -93,14 +81,6 @@ vpn:
     quota-period-days: ${VPN_FREE_QUOTA_PERIOD_DAYS:30}
     # 3x-ui's server-side meaning must be verified in staging; kept explicit.
     premium-unlimited-total-gb: ${VPN_PREMIUM_UNLIMITED_TOTAL_GB:0}
-  delivery:
-    enabled: ${VPN_DELIVERY_ENABLED:false}
-    batch-size: ${VPN_DELIVERY_BATCH_SIZE:10}
-    fixed-delay: ${VPN_DELIVERY_FIXED_DELAY:5s}
-    lease-duration: ${VPN_DELIVERY_LEASE_DURATION:2m}
-    max-attempts: ${VPN_DELIVERY_MAX_ATTEMPTS:5}
-    retry-initial-delay: ${VPN_DELIVERY_RETRY_INITIAL_DELAY:5s}
-    retry-max-delay: ${VPN_DELIVERY_RETRY_MAX_DELAY:5m}
   provider:
     type: ${VPN_PROVIDER_TYPE:fake}
     allow-fake: ${VPN_PROVIDER_ALLOW_FAKE:false}

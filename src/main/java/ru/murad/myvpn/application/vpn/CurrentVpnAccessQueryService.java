@@ -25,7 +25,7 @@ public class CurrentVpnAccessQueryService implements CurrentVpnAccessQuery {
     public Optional<VpnAccessView> findCurrent(UUID userId) {
         Objects.requireNonNull(userId, "userId");
         return subscriptionRepository
-                .findFirstByUserIdAndStatusOrderByExpiresAtDesc(
+                .findFirstByAccountIdAndStatusOrderByExpiresAtDesc(
                         userId, SubscriptionStatus.ACTIVE)
                 .flatMap(subscription -> vpnAccessRepository
                         .findBySubscriptionId(subscription.getId()))

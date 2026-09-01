@@ -24,9 +24,6 @@ public class PaymentEnvironmentGuard {
                 && properties.provider() == PaymentProviderType.FAKE) {
             throw new IllegalStateException("Fake payment provider is forbidden in production");
         }
-        if (environment.acceptsProfiles(Profiles.of("prod"))) {
-            require(environment, "telegram.bot-token");
-        }
         boolean activationEnabled = environment.getProperty("payment.activation.enabled", Boolean.class, false);
         String vpnProvider = environment.getProperty("vpn.provider.type", "fake");
         boolean allowFakeVpn = environment.getProperty("vpn.provider.allow-fake", Boolean.class, false);
@@ -55,10 +52,6 @@ public class PaymentEnvironmentGuard {
             require(environment, "payment.yookassa.shop-id");
             require(environment, "payment.yookassa.secret-key");
             require(environment, "payment.yookassa.return-url");
-        }
-        if (environment.acceptsProfiles(Profiles.of("prod", "staging"))
-                && properties.provider() == PaymentProviderType.TELEGRAM_YOOKASSA) {
-            require(environment, "payment.telegram.provider-token");
         }
     }
 

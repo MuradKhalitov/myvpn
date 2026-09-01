@@ -25,7 +25,7 @@ public class CurrentSubscriptionQueryService implements CurrentSubscriptionQuery
     public Optional<CurrentSubscriptionView> findCurrent(UUID userId) {
         Objects.requireNonNull(userId, "userId");
         return subscriptionRepository
-                .findFirstByUserIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
+                .findFirstByAccountIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
                         userId, SubscriptionStatus.ACTIVE, clock.instant())
                 .map(subscriptionMapper::toCurrentSubscriptionView);
     }

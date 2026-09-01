@@ -21,8 +21,8 @@ public class PaymentVerificationServiceImpl implements PaymentVerificationServic
     private final Clock clock;
 
     @Override
-    public PaymentVerificationResult verifyCurrentPayment(long telegramId) {
-        var preparation = transactions.prepare(telegramId, clock.instant(), properties.verification().minInterval());
+    public PaymentVerificationResult verifyCurrentPayment(java.util.UUID accountId) {
+        var preparation = transactions.prepare(accountId, clock.instant(), properties.verification().minInterval());
         if (preparation.immediateResult() != null) return preparation.immediateResult();
         var expected = preparation.prepared();
         PaymentProvider provider = providers.resolve(expected.provider());

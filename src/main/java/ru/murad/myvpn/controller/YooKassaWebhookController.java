@@ -2,8 +2,8 @@ package ru.murad.myvpn.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,7 +40,7 @@ public class YooKassaWebhookController {
     public ResponseEntity<String> paymentReturn() {
         String page = "<!doctype html><html lang=\"ru\"><head><meta charset=\"UTF-8\">"
                 + "<title>MyVPN</title></head><body><p>Оплата обрабатывается.</p>"
-                + "<p>Вернитесь в Telegram и нажмите «Проверить оплату».</p></body></html>";
+                + "<p>Откройте приложение MyVPN, чтобы проверить статус оплаты.</p></body></html>";
         return ResponseEntity.ok()
                 .contentType(new MediaType("text", "html", java.nio.charset.StandardCharsets.UTF_8))
                 .header("Content-Security-Policy", "default-src 'none'; style-src 'none'; base-uri 'none'; form-action 'none'")

@@ -32,8 +32,9 @@ public class Subscription {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    // Temporary historical-schema compatibility; clean baseline uses account_id.
     @JoinColumn(name = "user_id", nullable = false)
-    private TelegramUser user;
+    private Account account;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "tariff_id", nullable = false)
@@ -48,9 +49,6 @@ public class Subscription {
 
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
-
-    @Column(name = "activated_by_telegram_id", nullable = false)
-    private long activatedByTelegramId;
 
     @Column(name = "activated_at", nullable = false)
     private Instant activatedAt;
@@ -80,18 +78,16 @@ public class Subscription {
     @Column(name = "next_provisioning_attempt_at")
     private Instant nextProvisioningAttemptAt;
 
-    public void extend(VpnTariff tariff, long administratorTelegramId, Instant now) {
+    public void extend(VpnTariff tariff, Instant now) {
         this.tariff = tariff;
         this.expiresAt = expiresAt.plus(tariff.getDurationDays(), ChronoUnit.DAYS);
-        this.activatedByTelegramId = administratorTelegramId;
         this.activatedAt = now;
         this.updatedAt = now;
     }
 
-    public void setActivationTarget(VpnTariff tariff, long telegramId, Instant target, Instant now) {
+    public void setActivationTarget(VpnTariff tariff, Instant target, Instant now) {
         this.tariff = tariff;
         this.expiresAt = target;
-        this.activatedByTelegramId = telegramId;
         this.activatedAt = now;
         this.updatedAt = now;
     }

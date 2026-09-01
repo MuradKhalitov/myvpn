@@ -26,8 +26,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import java.security.SecureRandom;
-import java.util.Base64;
 
 @Entity
 @Table(name = "payment_orders")
@@ -41,14 +39,15 @@ public class PaymentOrder {
     private static final int FAILURE_CODE_MAX_LENGTH = 64;
     private static final Pattern FAILURE_CODE_PATTERN =
             Pattern.compile("[A-Z0-9_]{1,64}");
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     @Id
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    // Historical Liquibase still names this physical column user_id. The next
+    // clean baseline will rename it to account_id; the domain owner is Account.
     @JoinColumn(name = "user_id", nullable = false)
-    private TelegramUser user;
+    private Account account;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "tariff_id", nullable = false)
@@ -84,18 +83,6 @@ public class PaymentOrder {
 
     @Column(name = "confirmation_url", columnDefinition = "text")
     private String confirmationUrl;
-
-    @Column(name = "telegram_invoice_payload", length = 64, unique = true)
-    private String telegramInvoicePayload;
-
-    @Column(name = "telegram_invoice_message_id")
-    private Integer telegramInvoiceMessageId;
-
-    @Column(name = "telegram_payment_charge_id", length = 256, unique = true)
-    private String telegramPaymentChargeId;
-
-    @Column(name = "provider_payment_charge_id", length = 256, unique = true)
-    private String providerPaymentChargeId;
 
     @Column(name = "tariff_code_snapshot", nullable = false, length = 64)
     private String tariffCodeSnapshot;
@@ -159,13 +146,13 @@ public class PaymentOrder {
     private long version;
 
     public static PaymentOrder create(
-            TelegramUser user,
+            Account account,
             VpnTariff tariff,
             PaymentProviderType provider,
             Instant now,
             Duration pendingTtl
     ) {
-        Objects.requireNonNull(user, "user");
+        Objects.requireNonNull(account, "account");
         Objects.requireNonNull(tariff, "tariff");
         Objects.requireNonNull(provider, "provider");
         Objects.requireNonNull(now, "now");
@@ -196,7 +183,7 @@ public class PaymentOrder {
 
         PaymentOrder order = new PaymentOrder();
         order.id = UUID.randomUUID();
-        order.user = user;
+        order.account = account;
         order.tariff = tariff;
         order.provider = provider;
         order.idempotenceKey = UUID.randomUUID();
@@ -212,51 +199,7 @@ public class PaymentOrder {
         order.expiresAt = expiresAt;
         order.verificationAttempts = 0;
         order.activationAttempts = 0;
-        if (provider == PaymentProviderType.TELEGRAM_YOOKASSA) {
-            byte[] payloadBytes = new byte[32];
-            SECURE_RANDOM.nextBytes(payloadBytes);
-            order.telegramInvoicePayload = Base64.getUrlEncoder()
-                    .withoutPadding().encodeToString(payloadBytes);
-        }
         return order;
-    }
-
-    public void markTelegramInvoiceSent(int messageId, Instant now) {
-        Objects.requireNonNull(now, "now");
-        if (provider != PaymentProviderType.TELEGRAM_YOOKASSA
-                || telegramInvoicePayload == null) {
-            throw new PaymentStateTransitionException("Telegram invoice is not allowed");
-        }
-        if (messageId <= 0) {
-            throw new PaymentOrderValidationException("Telegram invoice message id must be positive");
-        }
-        if (status == PaymentStatus.PENDING) {
-            if (Objects.equals(telegramInvoiceMessageId, messageId)) return;
-            throw new PaymentStateTransitionException("Telegram invoice cannot be replaced");
-        }
-        transitionPayment(PaymentStatus.PENDING, now, PaymentStatus.CREATING);
-        telegramInvoiceMessageId = messageId;
-        providerPaymentId = telegramInvoicePayload;
-        providerCreatedAt = now.truncatedTo(ChronoUnit.MICROS);
-    }
-
-    public void recordSuccessfulTelegramPayment(
-            String telegramChargeId, String providerChargeId,
-            Instant paidAt, Instant now
-    ) {
-        requireText(telegramChargeId, "Telegram payment charge id");
-        requireText(providerChargeId, "Provider payment charge id");
-        if (telegramChargeId.length() > 256 || providerChargeId.length() > 256) {
-            throw new PaymentOrderValidationException("Payment charge id is too long");
-        }
-        if (status == PaymentStatus.SUCCEEDED) {
-            if (telegramChargeId.equals(telegramPaymentChargeId)
-                    && providerChargeId.equals(providerPaymentChargeId)) return;
-            throw new PaymentStateTransitionException("Payment charge ids cannot change");
-        }
-        this.telegramPaymentChargeId = telegramChargeId;
-        this.providerPaymentChargeId = providerChargeId;
-        markSucceeded(paidAt, now);
     }
 
     public void markCreating(Instant now) {

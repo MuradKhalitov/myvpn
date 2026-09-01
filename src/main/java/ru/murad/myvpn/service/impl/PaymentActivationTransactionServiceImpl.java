@@ -1,6 +1,5 @@
 package ru.murad.myvpn.service.impl;
 
-import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -9,12 +8,12 @@ import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.client.VpnProvider;
 import ru.murad.myvpn.config.PaymentProperties;
 import ru.murad.myvpn.exception.PaymentNotFoundException;
+import ru.murad.myvpn.exception.PaymentActivationResultMismatchException;
 import ru.murad.myvpn.exception.PaymentOrderValidationException;
 import ru.murad.myvpn.model.*;
 import ru.murad.myvpn.repository.PaymentOrderRepository;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
-import ru.murad.myvpn.repository.VpnDeliveryRepository;
 import ru.murad.myvpn.repository.VpnTariffRepository;
 import ru.murad.myvpn.service.*;
 
@@ -23,9 +22,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 
 @Service
 @RequiredArgsConstructor
@@ -36,8 +32,6 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
     private final SubscriptionRepository subscriptions;
     private final VpnAccessRepository accesses;
     private final VpnTariffRepository tariffs;
-    private final VpnDeliveryRepository deliveries;
-    private final EntityManager entityManager;
     private final PaymentProperties properties;
     private final VpnProvider vpnProvider;
 
@@ -55,7 +49,7 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 generation = order.claimActivation(token, lease, now, properties.activation().maxAttempts());
             }
             Subscription active;
-            List<Subscription> allActive = subscriptions.findAllByUserIdAndStatus(order.getUser().getId(), SubscriptionStatus.ACTIVE);
+            List<Subscription> allActive = subscriptions.findAllByAccountIdAndStatus(order.getAccount().getId(), SubscriptionStatus.ACTIVE);
             if (allActive.size() > 1) {
                 order.markActivationManualReviewRequired(token, generation, now);
                 order.setSafeFailureCode("ACTIVATION_MULTIPLE_ACTIVE_SUBSCRIPTIONS");
@@ -94,8 +88,8 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 target = plus(base, java.time.Duration.ofDays(order.getDurationDaysSnapshot()), "Activation target");
                 order.fixActivationTargetExpiresAt(token, generation, target, now);
             }
-            String external = active == null ? order.getUser().getId().toString() : access.getExternalAccessId();
-            result.add(new PreparedPaymentActivation(order.getId(), order.getUser().getId(), order.getProvider(), action,
+            String external = active == null ? order.getAccount().getId().toString() : access.getExternalAccessId();
+            result.add(new PreparedPaymentActivation(order.getId(), order.getAccount().getId(), order.getProvider(), action,
                     generation, token, order.getDurationDaysSnapshot(), target,
                     active == null ? null : active.getId(), active == null ? null : access.getId(), external,
                     active == null ? null : active.getVersion(), active == null ? null : active.getExpiresAt(),
@@ -147,46 +141,39 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
         Subscription subscription;
         if (p.action() == PaymentActivationAction.PROVISION) {
             if (order.getSubscription() != null) return PaymentActivationOutcome.ALREADY_ACTIVATED;
-            subscription = Subscription.builder().id(UUID.randomUUID()).user(order.getUser()).tariff(tariff)
+            subscription = Subscription.builder().id(UUID.randomUUID()).account(order.getAccount()).tariff(tariff)
                     .status(SubscriptionStatus.ACTIVE).startsAt(now).expiresAt(p.targetExpiresAt())
-                    .activatedByTelegramId(order.getUser().getTelegramId()).activatedAt(now).createdAt(now).updatedAt(now).build();
+                    .activatedAt(now).createdAt(now).updatedAt(now).build();
             subscriptions.save(subscription);
-            VpnAccess access = VpnAccess.builder().id(UUID.randomUUID())
-                    .account(entityManager.getReference(Account.class, order.getUser().getId()))
-                    .subscription(subscription)
-                    .providerName(result.providerName()).externalAccessId(result.externalAccessId())
-                    .configurationData(result.configurationData())
-                    .status(VpnAccessStatus.ACTIVE).issuedAt(now).createdAt(now).updatedAt(now).build();
+            VpnAccess access = accesses.findByAccountId(order.getAccount().getId()).orElse(null);
+            if (access == null) {
+                access = VpnAccess.builder().id(UUID.randomUUID()).account(order.getAccount())
+                        .subscription(subscription).providerName(result.providerName())
+                        .externalAccessId(result.externalAccessId()).configurationData(result.configurationData())
+                        .status(VpnAccessStatus.ACTIVE).issuedAt(now).createdAt(now).updatedAt(now).build();
+            } else {
+                if (!access.getExternalAccessId().equals(result.externalAccessId())) {
+                    throw new PaymentActivationResultMismatchException("Existing account VPN access differs from provider result");
+                }
+                access.attachSubscription(subscription, now);
+            }
+            access.requestPolicy(VpnEntitlement.PREMIUM, now, p.targetExpiresAt(), now);
             accesses.save(access);
             order.attachSubscription(subscription, now);
         } else {
             subscription = subscriptions.findByIdForUpdate(p.existingSubscriptionId()).orElseThrow(PaymentNotFoundException::new);
             VpnAccess access = accesses.findByIdForUpdate(p.existingVpnAccessId()).orElse(null);
             if (access == null) return PaymentActivationOutcome.STALE;
-            if (!subscription.getUser().getId().equals(order.getUser().getId()) || !access.getId().equals(p.existingVpnAccessId())
+            if (!subscription.getAccount().getId().equals(order.getAccount().getId()) || !access.getId().equals(p.existingVpnAccessId())
                     || !access.getExternalAccessId().equals(p.stableExternalClientId()) || subscription.getStatus() != SubscriptionStatus.ACTIVE
                     || access.getStatus() != VpnAccessStatus.ACTIVE || !Objects.equals(access.getVersion(), p.existingVpnAccessVersion())
                     || !Objects.equals(access.getProviderName(), p.existingVpnProviderName())
                     || !result.externalAccessId().equals(access.getExternalAccessId())
                     || !Objects.equals(subscription.getVersion(), p.existingSubscriptionVersion())
                     || !subscription.getExpiresAt().equals(p.existingSubscriptionExpiresAt())) return PaymentActivationOutcome.STALE;
-            subscription.setActivationTarget(tariff, order.getUser().getTelegramId(), p.targetExpiresAt(), now);
+            subscription.setActivationTarget(tariff, p.targetExpiresAt(), now);
             subscriptions.save(subscription);
         }
-        VpnAccess deliveryAccess = p.action() == PaymentActivationAction.PROVISION
-                ? accesses.findBySubscriptionId(subscription.getId()).orElseThrow(PaymentNotFoundException::new)
-                : accesses.findByIdForUpdate(p.existingVpnAccessId()).orElseThrow(PaymentNotFoundException::new);
-        if (deliveryAccess.getConfigurationData() == null || deliveryAccess.getConfigurationData().isBlank()) {
-            throw new PaymentOrderValidationException("VPN configuration is unavailable for delivery");
-        }
-        validateDeliveryRelationshipGraph(order, subscription, deliveryAccess);
-        // The outbox snapshots optimistic-lock versions. Flush the preceding subscription/access
-        // mutation first so Hibernate has populated their persisted @Version values.
-        entityManager.flush();
-        VpnDeliveryType deliveryType = p.action() == PaymentActivationAction.PROVISION
-                ? VpnDeliveryType.ACTIVATION_PROVISION : VpnDeliveryType.ACTIVATION_EXTEND;
-        deliveries.save(VpnDelivery.automatic(order.getUser(), subscription, deliveryAccess, order,
-                deliveryType, configurationFingerprint(deliveryAccess.getConfigurationData()), now));
         order.markActivated(p.token(), p.generation(), now);
         orders.save(order);
         return PaymentActivationOutcome.SUCCEEDED;
@@ -215,7 +202,7 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 && Objects.equals(o.getActivationTargetExpiresAt(), p.targetExpiresAt());
     }
     private boolean matchesWithoutTarget(PaymentOrder o, PreparedPaymentActivation p) {
-        return o.getId().equals(p.paymentOrderId()) && o.getUser().getId().equals(p.userId())
+        return o.getId().equals(p.paymentOrderId()) && o.getAccount().getId().equals(p.accountId())
                 && o.getStatus() == p.paymentStatus() && o.getProvider() == p.provider()
                 && o.getActivationStatus() == p.activationStatus() && o.getActivationGeneration() == p.generation()
                 && Objects.equals(o.getActivationClaimToken(), p.token()) && o.getActivationStatus() == PaymentActivationStatus.PROCESSING
@@ -258,25 +245,5 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
         }
     }
 
-    private String configurationFingerprint(String configuration) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(configuration.getBytes(StandardCharsets.UTF_8));
-            StringBuilder result = new StringBuilder(64);
-            for (byte value : digest) result.append(String.format("%02x", value));
-            return result.toString();
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is unavailable", impossible);
-        }
-    }
-    private void validateDeliveryRelationshipGraph(PaymentOrder order, Subscription subscription, VpnAccess access) {
-        if (!same(order.getUser().getId(), subscription.getUser().getId())
-                || !same(subscription.getId(), access.getSubscription().getId())
-                || order.getSubscription() == null
-                || !same(subscription.getId(), order.getSubscription().getId())) {
-            throw new PaymentOrderValidationException("VPN delivery relationship graph is invalid");
-        }
-    }
-    private boolean same(UUID left, UUID right) { return left != null && left.equals(right); }
     private Instant plus(Instant base, java.time.Duration amount, String message) { try { return base.plus(amount).truncatedTo(ChronoUnit.MICROS); } catch (DateTimeException | ArithmeticException e) { throw new PaymentOrderValidationException(message + " cannot be applied"); } }
 }

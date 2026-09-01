@@ -21,8 +21,6 @@ spring:
     host: ${SMTP_HOST:?SMTP_HOST is required in production}
 
 vpn:
-  delivery:
-    enabled: ${VPN_DELIVERY_ENABLED:true}
   provider:
     type: ${VPN_PROVIDER_TYPE:?VPN_PROVIDER_TYPE is required in production}
     allow-fake: ${VPN_PROVIDER_ALLOW_FAKE:false}

@@ -2,7 +2,7 @@
 
 ## Project
 
-Telegram bot for selling and managing VPN subscriptions.
+Android-first backend for VPN access and premium subscriptions.
 
 ## Technology stack
 

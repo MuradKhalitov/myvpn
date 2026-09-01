@@ -26,25 +26,14 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, UUID
 
     Optional<PaymentOrder> findByIdempotenceKey(UUID idempotenceKey);
 
-    Optional<PaymentOrder> findByTelegramInvoicePayload(String payload);
-
-    Optional<PaymentOrder> findByTelegramPaymentChargeId(String chargeId);
-
-    Optional<PaymentOrder> findByProviderPaymentChargeId(String chargeId);
-
-    @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select p from PaymentOrder p join fetch p.user where p.telegramInvoicePayload = :payload")
-    Optional<PaymentOrder> findByTelegramInvoicePayloadForUpdate(
-            @Param("payload") String payload);
-
-    Optional<PaymentOrder> findFirstByUserIdAndStatusIn(
-            UUID userId,
+    Optional<PaymentOrder> findFirstByAccountIdAndStatusIn(
+            UUID accountId,
             Collection<PaymentStatus> statuses
     );
 
-    default Optional<PaymentOrder> findOpenByUser(UUID userId) {
-        return findFirstByUserIdAndStatusIn(
-                userId,
+    default Optional<PaymentOrder> findOpenByAccount(UUID accountId) {
+        return findFirstByAccountIdAndStatusIn(
+                accountId,
                 EnumSet.of(
                         PaymentStatus.NEW,
                         PaymentStatus.CREATING,
@@ -52,16 +41,13 @@ public interface PaymentOrderRepository extends JpaRepository<PaymentOrder, UUID
                         PaymentStatus.MANUAL_REVIEW_REQUIRED));
     }
 
-    @Query("select p from PaymentOrder p where p.user.id = :userId order by p.createdAt desc")
-    List<PaymentOrder> findAllByUserOrderByCreatedAtDesc(@Param("userId") UUID userId);
+    @Query("select p from PaymentOrder p where p.account.id = :accountId order by p.createdAt desc")
+    List<PaymentOrder> findAllByAccountOrderByCreatedAtDesc(@Param("accountId") UUID accountId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select paymentOrder from PaymentOrder paymentOrder where paymentOrder.id = :id")
     Optional<PaymentOrder> findByIdForUpdate(@Param("id") UUID id);
 
-    @EntityGraph(attributePaths = {"user", "subscription"})
-    @Query("select paymentOrder from PaymentOrder paymentOrder where paymentOrder.id = :id")
-    Optional<PaymentOrder> findByIdForDelivery(@Param("id") UUID id);
 
     @Query(value = """
             SELECT * FROM payment_orders

@@ -1,14 +1,11 @@
 # Shared runtime hardening is inherited from application.yml.
-# Staging uses the BotFather/YooKassa test provider token.
 payment:
-  provider: ${PAYMENT_PROVIDER:telegram-yookassa}
+  provider: ${PAYMENT_PROVIDER:yookassa}
   allow-fake: ${PAYMENT_ALLOW_FAKE:false}
   activation:
     enabled: ${PAYMENT_ACTIVATION_ENABLED:true}
 
 vpn:
-  delivery:
-    enabled: ${VPN_DELIVERY_ENABLED:true}
   provider:
     type: ${VPN_PROVIDER_TYPE:3x-ui}
     allow-fake: false
