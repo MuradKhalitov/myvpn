@@ -32,8 +32,7 @@ public class Subscription {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    // Temporary historical-schema compatibility; clean baseline uses account_id.
-    @JoinColumn(name = "user_id", nullable = false)
+    @JoinColumn(name = "account_id", nullable = false)
     private Account account;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

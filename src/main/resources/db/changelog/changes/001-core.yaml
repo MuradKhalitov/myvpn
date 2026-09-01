@@ -1,0 +1,14 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-core
+      author: myvpn
+      changes:
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TABLE accounts (id uuid PRIMARY KEY, status varchar(16) NOT NULL CHECK (status IN ('ACTIVE','BLOCKED','DELETED')), version bigint NOT NULL DEFAULT 0, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
+              CREATE TABLE account_identities (id uuid PRIMARY KEY, account_id uuid NOT NULL REFERENCES accounts(id), type varchar(16) NOT NULL CHECK (type IN ('DEVICE','EMAIL')), subject varchar(320) NOT NULL, normalized_subject varchar(320) NOT NULL, verified_at timestamptz, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL, version bigint NOT NULL DEFAULT 0, CONSTRAINT uk_account_identities_type_subject UNIQUE (type, normalized_subject), CONSTRAINT uk_account_identities_account_type UNIQUE (account_id, type));
+              CREATE INDEX idx_account_identities_account ON account_identities(account_id);
+              CREATE TABLE vpn_tariffs (id uuid PRIMARY KEY, code varchar(50) NOT NULL UNIQUE, name varchar(100) NOT NULL, description varchar(500), duration_days integer NOT NULL CHECK (duration_days > 0), price numeric(19,2) NOT NULL CHECK (price >= 0), currency varchar(3) NOT NULL, active boolean NOT NULL DEFAULT true, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL);
+              CREATE INDEX idx_vpn_tariffs_active ON vpn_tariffs(active);
+              INSERT INTO vpn_tariffs(id,code,name,description,duration_days,price,currency,active,created_at,updated_at) VALUES ('10000000-0000-0000-0000-000000000001','MONTH_1','1 month','VPN access for 30 days',30,90.00,'RUB',true,'2026-07-24T00:00:00Z','2026-07-24T00:00:00Z'),('10000000-0000-0000-0000-000000000003','MONTH_3','3 months','VPN access for 90 days',90,240.00,'RUB',true,'2026-07-24T00:00:00Z','2026-07-24T00:00:00Z'),('10000000-0000-0000-0000-000000000006','MONTH_6','6 months','VPN access for 180 days',180,420.00,'RUB',true,'2026-07-24T00:00:00Z','2026-07-24T00:00:00Z'),('10000000-0000-0000-0000-000000000012','YEAR_1','1 year','VPN access for 365 days',365,720.00,'RUB',true,'2026-07-24T00:00:00Z','2026-07-24T00:00:00Z');

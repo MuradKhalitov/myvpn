@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 004-payments
+      author: myvpn
+      changes:
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TABLE payment_orders (id uuid PRIMARY KEY, account_id uuid NOT NULL REFERENCES accounts(id), tariff_id uuid NOT NULL REFERENCES vpn_tariffs(id), subscription_id uuid REFERENCES subscriptions(id), provider varchar(32) NOT NULL CHECK (provider IN ('FAKE','YOOKASSA')), provider_payment_id varchar(128), idempotence_key uuid NOT NULL UNIQUE, amount numeric(19,2) NOT NULL CHECK (amount > 0), currency varchar(3) NOT NULL CHECK (currency = 'RUB'), status varchar(32) NOT NULL, activation_status varchar(32) NOT NULL, confirmation_url text, tariff_code_snapshot varchar(64) NOT NULL, tariff_name_snapshot varchar(128) NOT NULL, duration_days_snapshot integer NOT NULL CHECK (duration_days_snapshot > 0), provider_created_at timestamptz, provider_expires_at timestamptz, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, paid_at timestamptz, next_verification_at timestamptz, verification_attempts integer NOT NULL DEFAULT 0 CHECK (verification_attempts >= 0), activation_target_expires_at timestamptz, activation_lease_until timestamptz, activation_claim_token uuid, activation_generation bigint NOT NULL DEFAULT 0 CHECK (activation_generation >= 0), activation_attempts integer NOT NULL DEFAULT 0 CHECK (activation_attempts >= 0), next_activation_at timestamptz, safe_failure_code varchar(64), activation_completed_at timestamptz, version bigint NOT NULL DEFAULT 0, CONSTRAINT chk_payment_orders_confirmation_url_length CHECK (confirmation_url IS NULL OR length(confirmation_url) <= 2048), CONSTRAINT uk_payment_orders_provider_payment UNIQUE(provider, provider_payment_id));
+              CREATE INDEX idx_payment_orders_account ON payment_orders(account_id);
+              CREATE INDEX idx_payment_orders_status ON payment_orders(status);
+              CREATE INDEX idx_payment_orders_activation_status ON payment_orders(activation_status);
+              CREATE INDEX idx_payment_orders_expires_at ON payment_orders(expires_at);
+              CREATE INDEX idx_payment_orders_next_verification_at ON payment_orders(next_verification_at);
+              CREATE INDEX idx_payment_orders_activation_lease_until ON payment_orders(activation_lease_until);
+              CREATE INDEX idx_payment_orders_tariff ON payment_orders(tariff_id);
+              CREATE INDEX idx_payment_orders_subscription ON payment_orders(subscription_id);
+              CREATE UNIQUE INDEX uk_payment_order_open_account ON payment_orders(account_id) WHERE status IN ('NEW','CREATING','PENDING','MANUAL_REVIEW_REQUIRED');

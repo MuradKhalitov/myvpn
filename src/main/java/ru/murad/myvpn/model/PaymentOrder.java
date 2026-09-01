@@ -44,9 +44,7 @@ public class PaymentOrder {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    // Historical Liquibase still names this physical column user_id. The next
-    // clean baseline will rename it to account_id; the domain owner is Account.
-    @JoinColumn(name = "user_id", nullable = false)
+    @JoinColumn(name = "account_id", nullable = false)
     private Account account;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

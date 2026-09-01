@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-vpn
+      author: myvpn
+      changes:
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TABLE vpn_accesses (id uuid PRIMARY KEY, account_id uuid NOT NULL REFERENCES accounts(id), subscription_id uuid UNIQUE REFERENCES subscriptions(id), provider_name varchar(32) NOT NULL, external_access_id varchar(128) NOT NULL UNIQUE, provider_client_key varchar(96), configuration_data text, status varchar(16) NOT NULL CHECK (status IN ('PROVISIONING','ACTIVE','REVOKED')), issued_at timestamptz NOT NULL, revoked_at timestamptz, configuration_deleted_at timestamptz, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL, desired_entitlement varchar(16) NOT NULL DEFAULT 'FREE' CHECK (desired_entitlement IN ('FREE','PREMIUM')), applied_entitlement varchar(16) CHECK (applied_entitlement IS NULL OR applied_entitlement IN ('FREE','PREMIUM')), policy_generation bigint NOT NULL DEFAULT 0, policy_status varchar(24) NOT NULL DEFAULT 'RETRY_REQUIRED' CHECK (policy_status IN ('PENDING','APPLIED','RETRY_REQUIRED')), next_policy_attempt_at timestamptz, quota_period_started_at timestamptz, quota_period_ends_at timestamptz, version bigint NOT NULL DEFAULT 0, CONSTRAINT uk_vpn_accesses_account UNIQUE(account_id));
+              CREATE INDEX idx_vpn_accesses_policy ON vpn_accesses(policy_status,next_policy_attempt_at);

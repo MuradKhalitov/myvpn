@@ -1,35 +1,6 @@
 databaseChangeLog:
-  - include:
-      file: db/changelog/changes/001-create-telegram-users.yaml
-  - include:
-      file: db/changelog/changes/002-create-vpn-tariffs.yaml
-  - include:
-      file: db/changelog/changes/003-create-subscriptions-and-vpn-accesses.yaml
-  - include:
-      file: db/changelog/changes/004-add-subscription-provisioning-states.yaml
-  - include:
-      file: db/changelog/changes/005-harden-subscription-provisioning.yaml
-  - include:
-      file: db/changelog/changes/006-fence-subscription-recovery.yaml
-  - include:
-      file: db/changelog/changes/007-create-payment-orders.yaml
-  - include:
-      file: db/changelog/changes/008-add-provider-payment-expiry.yaml
-  - include:
-      file: db/changelog/changes/009-add-payment-activation-scheduling.yaml
-  - include:
-      file: db/changelog/changes/010-harden-payment-activation-audit.yaml
-  - include:
-      file: db/changelog/changes/011-add-vpn-delivery-outbox.yaml
-  - include:
-      file: db/changelog/changes/012-add-telegram-payments.yaml
-  - include:
-      file: db/changelog/changes/013-add-accounts-and-identities.yaml
-  - include:
-      file: db/changelog/changes/014-add-email-auth.yaml
-  - include:
-      file: db/changelog/changes/015-account-scoped-vpn-accesses.yaml
-  - include:
-      file: db/changelog/changes/016-add-vpn-provider-client-key.yaml
-  - include:
-      file: db/changelog/changes/017-add-device-identities.yaml
+  - include: { file: db/changelog/changes/001-core.yaml }
+  - include: { file: db/changelog/changes/002-auth.yaml }
+  - include: { file: db/changelog/changes/003-subscriptions.yaml }
+  - include: { file: db/changelog/changes/004-payments.yaml }
+  - include: { file: db/changelog/changes/005-vpn.yaml }

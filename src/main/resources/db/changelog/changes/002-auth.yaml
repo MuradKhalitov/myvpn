@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-auth
+      author: myvpn
+      changes:
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TABLE device_credentials (id uuid PRIMARY KEY, identity_id uuid NOT NULL UNIQUE REFERENCES account_identities(id), secret_hash varchar(64) NOT NULL, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL, last_used_at timestamptz, revoked_at timestamptz, version bigint NOT NULL DEFAULT 0);
+              CREATE TABLE email_otp_challenges (id uuid PRIMARY KEY, normalized_email varchar(320) NOT NULL, code_hash varchar(64) NOT NULL, expires_at timestamptz NOT NULL, resend_after timestamptz NOT NULL, attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0), max_attempts integer NOT NULL CHECK (max_attempts > 0 AND attempts <= max_attempts), consumed_at timestamptz, invalidated_at timestamptz, created_at timestamptz NOT NULL, version bigint NOT NULL DEFAULT 0);
+              CREATE INDEX idx_email_otp_lookup ON email_otp_challenges(normalized_email, created_at DESC);
+              CREATE UNIQUE INDEX uk_email_otp_one_active ON email_otp_challenges(normalized_email) WHERE consumed_at IS NULL AND invalidated_at IS NULL;
+              CREATE TABLE auth_sessions (id uuid PRIMARY KEY, account_id uuid NOT NULL REFERENCES accounts(id), refresh_token_hash varchar(64) NOT NULL UNIQUE, token_family_id uuid NOT NULL, rotation_counter bigint NOT NULL DEFAULT 0, expires_at timestamptz NOT NULL, last_used_at timestamptz, revoked_at timestamptz, created_at timestamptz NOT NULL, version bigint NOT NULL DEFAULT 0);
+              CREATE INDEX idx_auth_sessions_account ON auth_sessions(account_id);
+              CREATE INDEX idx_auth_sessions_family ON auth_sessions(token_family_id);

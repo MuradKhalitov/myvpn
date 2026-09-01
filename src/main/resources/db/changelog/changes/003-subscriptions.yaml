@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-subscriptions
+      author: myvpn
+      changes:
+        - sql:
+            splitStatements: false
+            sql: |
+              CREATE TABLE subscriptions (id uuid PRIMARY KEY, account_id uuid NOT NULL REFERENCES accounts(id), tariff_id uuid NOT NULL REFERENCES vpn_tariffs(id), status varchar(32) NOT NULL CHECK (status IN ('PENDING','RECONCILIATION_REQUIRED','MANUAL_REVIEW_REQUIRED','ACTIVE','FAILED','EXPIRED','REVOKED')), starts_at timestamptz NOT NULL, expires_at timestamptz NOT NULL, activated_at timestamptz NOT NULL, created_at timestamptz NOT NULL, updated_at timestamptz NOT NULL, version bigint NOT NULL DEFAULT 0, provisioning_owner varchar(64), provisioning_lease_until timestamptz, provisioning_claim_token uuid, provisioning_attempt_count integer NOT NULL DEFAULT 0 CHECK (provisioning_attempt_count >= 0), next_provisioning_attempt_at timestamptz);
+              CREATE INDEX idx_subscriptions_account_status ON subscriptions(account_id,status);
+              CREATE INDEX idx_subscriptions_status_expiry ON subscriptions(status,expires_at);
+              CREATE INDEX idx_subscriptions_status_updated ON subscriptions(status,updated_at);
+              CREATE UNIQUE INDEX uk_subscriptions_active_account ON subscriptions(account_id) WHERE status = 'ACTIVE';
