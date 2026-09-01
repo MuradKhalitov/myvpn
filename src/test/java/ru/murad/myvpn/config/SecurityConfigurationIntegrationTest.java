@@ -17,6 +17,11 @@ class SecurityConfigurationIntegrationTest extends AuthIntegrationTestSupport {
     void protectedApiRejectsMissingAndInvalidJwt() {
         webTestClient.get().uri("/api/v1/protected-resource")
                 .exchange().expectStatus().isUnauthorized();
+        webTestClient.get().uri("/api/v1/vpn/access")
+                .exchange().expectStatus().isUnauthorized();
+        webTestClient.get().uri("/api/v1/vpn/access")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer invalid")
+                .exchange().expectStatus().isUnauthorized();
         webTestClient.get().uri("/api/v1/protected-resource")
                 .header(HttpHeaders.AUTHORIZATION, "Bearer invalid")
                 .exchange().expectStatus().isUnauthorized();
