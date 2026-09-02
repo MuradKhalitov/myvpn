@@ -10,7 +10,11 @@ Current backend foundation:
 - PREMIUM subscription and direct YooKassa payment foundation;
 - 3x-ui/Xray provisioning, retries, fencing and reconciliation.
 
-The Android UI and `GET /api/v1/vpn/access` endpoint are intentionally not implemented yet.
+The Android MVP client is isolated under `android/`; authenticated clients use `GET /api/v1/vpn/access`.
+
+## Android MVP
+
+Open `android/` in Android Studio with JDK 17 and SDK 35. Set `API_BASE_URL` in `android/app/build.gradle.kts`. Run `gradlew.bat test` or `gradlew.bat assembleDebug`; APK output is `android/app/build/outputs/apk/debug/app-debug.apk`. Device credentials and tokens use Android Keystore. Email recovery, payments, release signing, reinstall recovery, and the native XTLS/libXray engine remain follow-up work.
 
 ## Local development
 

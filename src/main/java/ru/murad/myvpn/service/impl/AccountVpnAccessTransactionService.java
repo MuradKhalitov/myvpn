@@ -3,6 +3,7 @@ package ru.murad.myvpn.service.impl;
 import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import ru.murad.myvpn.model.Account;
 import ru.murad.myvpn.model.VpnAccess;
 import ru.murad.myvpn.model.VpnAccessStatus;
@@ -25,7 +26,7 @@ public class AccountVpnAccessTransactionService {
         this.accounts = accounts; this.accesses = accesses; this.entityManager = entityManager;
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public VpnAccess reserveFree(UUID accountId, String providerName, Instant start, Instant end) {
         return accesses.findFirstByAccountIdAndSubscriptionIsNull(accountId).orElseGet(() -> {
             if (!accounts.existsById(accountId)) throw new IllegalArgumentException("Account not found");
@@ -40,7 +41,7 @@ public class AccountVpnAccessTransactionService {
         });
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public boolean completeFree(UUID accessId, long generation, String providerName,
             String configurationData, Instant now) {
         return accesses.findByIdForUpdate(accessId).map(access -> {
