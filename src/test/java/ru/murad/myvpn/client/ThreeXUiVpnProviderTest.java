@@ -382,6 +382,33 @@ class ThreeXUiVpnProviderTest {
     }
 
     @Test
+    void freePolicyReusesTheExistingClientAndStableResetKey() {
+        ThreeXUiInboundResponse before = inbound("before");
+        ThreeXUiInboundResponse after = inbound("after");
+        ThreeXUiVlessClient existing = client(EXPIRY.toEpochMilli());
+        ThreeXUiVlessClient limited = new ThreeXUiVlessClient(existing.id(), existing.security(),
+                existing.password(), existing.flow(), existing.auth(), existing.email(), existing.limitIp(),
+                100L, existing.expiryTime(), existing.enable(), existing.tgId(), existing.subId(),
+                existing.comment(), existing.reset(), existing.createdAt(), existing.updatedAt());
+        ThreeXUiClientRequest update = new ThreeXUiClientRequest(42, "free-policy");
+        when(inboundClient.getInbound(any())).thenReturn(before);
+        when(inboundClient.getInboundForReconciliation(any())).thenReturn(after);
+        when(inboundClient.parseSettings(before)).thenReturn(new ThreeXUiInboundSettings(List.of(existing)));
+        when(inboundClient.parseSettings(after)).thenReturn(new ThreeXUiInboundSettings(List.of(limited)));
+        when(inboundClient.prepareTrafficPolicyUpdateRequest(before, SUBSCRIPTION_ID.toString(), 100L))
+                .thenReturn(update);
+        when(inboundClient.otherClientsUnchanged(before, after, SUBSCRIPTION_ID.toString())).thenReturn(true);
+
+        provider.applyTrafficPolicy(SUBSCRIPTION_ID.toString(), "stable-reset-key", VpnTrafficPolicy.limited(100L));
+
+        verify(inboundClient).updateClient(org.mockito.ArgumentMatchers.eq(SUBSCRIPTION_ID.toString()),
+                org.mockito.ArgumentMatchers.eq(update), org.mockito.ArgumentMatchers.any());
+        verify(inboundClient).resetClientTraffic(org.mockito.ArgumentMatchers.eq("stable-reset-key"),
+                org.mockito.ArgumentMatchers.any());
+        verify(inboundClient, never()).deleteClient(any(), any());
+    }
+
+    @Test
     void shouldTreatMissingClientAsAlreadyRevoked() {
         ThreeXUiInboundResponse inbound = inbound();
         when(inboundClient.getInbound(any())).thenReturn(inbound);

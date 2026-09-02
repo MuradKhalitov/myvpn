@@ -134,6 +134,8 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
                         prepared.targetExpiresAt(), prepared.stableExternalClientId());
                 yield () -> vpnProvider.provision(request);
             }
+            case ACTIVATE_EXISTING -> () -> new ProvisionedVpnAccess(prepared.vpnProviderName(),
+                    prepared.stableExternalClientId(), null, prepared.targetExpiresAt());
             case EXTEND -> {
                 VpnExtensionRequest request = new VpnExtensionRequest(prepared.stableExternalClientId(),
                         prepared.targetExpiresAt());

@@ -529,12 +529,25 @@ class PaymentActivationServiceTest {
                 .doesNotContain(external, configuration);
     }
 
+    @Test void existingFreeAccessUpgradeDoesNotInvokeTheVpnProviderAgain() {
+        PreparedPaymentActivation p = prepared(PaymentActivationAction.ACTIVATE_EXISTING);
+        ProvisionedVpnAccess expected = result(p, null);
+        when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(p));
+        when(transactions.complete(p, expected, NOW))
+                .thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
+
+        assertThat(service.processPendingActivations(20).succeeded()).isEqualTo(1);
+
+        verify(provider, never()).provision(any());
+        verify(provider, never()).extend(any());
+    }
+
     private void runSuccess(PaymentActivationAction action) {
         PreparedPaymentActivation p = prepared(action);
         ProvisionedVpnAccess r = result(p, action == PaymentActivationAction.PROVISION ? "config" : null);
         when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(p));
         if (action == PaymentActivationAction.PROVISION) when(provider.provision(any())).thenReturn(r);
-        else when(provider.extend(any())).thenReturn(r);
+        else if (action == PaymentActivationAction.EXTEND) when(provider.extend(any())).thenReturn(r);
         when(transactions.complete(p, r, NOW)).thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
         assertThat(service.processPendingActivations(20).succeeded()).isEqualTo(1);
     }
@@ -552,8 +565,8 @@ class PaymentActivationServiceTest {
         return new PreparedPaymentActivation(UUID.randomUUID(), UUID.randomUUID(), PaymentProviderType.FAKE, action,
                 3L, UUID.randomUUID(), 30, TARGET,
                 action == PaymentActivationAction.EXTEND ? UUID.randomUUID() : null,
-                action == PaymentActivationAction.EXTEND ? UUID.randomUUID() : null,
-                "stable-client", action == PaymentActivationAction.EXTEND ? 4L : null,
+                action == PaymentActivationAction.PROVISION ? null : UUID.randomUUID(),
+                "stable-client", action == PaymentActivationAction.PROVISION ? null : 4L,
                 action == PaymentActivationAction.EXTEND ? NOW : null);
     }
 

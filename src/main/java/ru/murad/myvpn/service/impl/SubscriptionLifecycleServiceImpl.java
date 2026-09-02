@@ -4,9 +4,10 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import ru.murad.myvpn.client.VpnProvider;
+import ru.murad.myvpn.config.VpnTrafficProperties;
 import ru.murad.myvpn.model.SubscriptionStatus;
 import ru.murad.myvpn.model.VpnAccessStatus;
+import ru.murad.myvpn.model.VpnEntitlement;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
 import ru.murad.myvpn.service.SubscriptionLifecycleService;
@@ -22,7 +23,8 @@ public class SubscriptionLifecycleServiceImpl implements SubscriptionLifecycleSe
     private static final long CONFIGURATION_RETENTION_DAYS = 30;
     private final SubscriptionRepository subscriptions;
     private final VpnAccessRepository accesses;
-    private final VpnProvider provider;
+    private final VpnTrafficPolicyTransactionService policyTransactions;
+    private final VpnTrafficProperties traffic;
     private final Clock clock;
 
     @Override
@@ -34,11 +36,10 @@ public class SubscriptionLifecycleServiceImpl implements SubscriptionLifecycleSe
             var access = accesses.findBySubscriptionId(subscription.getId()).orElse(null);
             try {
                 if (access != null && access.getStatus() == VpnAccessStatus.ACTIVE) {
-                    provider.revoke(access.getExternalAccessId());
-                    access.revoke(now);
-                    accesses.save(access);
+                    policyTransactions.request(access.getAccount().getId(), VpnEntitlement.FREE,
+                            now, now.plus(traffic.quotaPeriodDays(), ChronoUnit.DAYS), now);
                 }
-                subscription.revoke(now);
+                subscription.markExpired(now);
                 subscriptions.save(subscription);
                 processed++;
             } catch (RuntimeException ex) {

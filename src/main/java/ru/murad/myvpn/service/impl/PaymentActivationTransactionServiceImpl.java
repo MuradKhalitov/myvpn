@@ -63,7 +63,9 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 order.setSafeFailureCode("ACTIVATION_LINKED_SUBSCRIPTION_NOT_FOUND");
                 continue;
             }
-            VpnAccess access = active == null ? null : accesses.findBySubscriptionId(active.getId()).orElse(null);
+            VpnAccess access = active == null
+                    ? accesses.findByAccountId(order.getAccount().getId()).orElse(null)
+                    : accesses.findBySubscriptionId(active.getId()).orElse(null);
             if (active != null && (access == null || active.getStatus() != SubscriptionStatus.ACTIVE
                     || access.getStatus() != VpnAccessStatus.ACTIVE)) {
                 order.markActivationManualReviewRequired(token, generation, now);
@@ -81,22 +83,26 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 }
                 order.attachSubscription(active, now);
             }
-            PaymentActivationAction action = active == null ? PaymentActivationAction.PROVISION : PaymentActivationAction.EXTEND;
+            PaymentActivationAction action = active != null ? PaymentActivationAction.EXTEND
+                    : access != null && access.getStatus() == VpnAccessStatus.ACTIVE
+                            ? PaymentActivationAction.ACTIVATE_EXISTING : PaymentActivationAction.PROVISION;
             Instant target = order.getActivationTargetExpiresAt();
-            if (target == null && (active != null || !"3X_UI".equals(vpnProvider.providerName()))) {
+            if (target == null && (action != PaymentActivationAction.PROVISION || !"3X_UI".equals(vpnProvider.providerName()))) {
                 Instant base = active == null || active.getExpiresAt().isBefore(now) ? now : active.getExpiresAt();
                 target = plus(base, java.time.Duration.ofDays(order.getDurationDaysSnapshot()), "Activation target");
                 order.fixActivationTargetExpiresAt(token, generation, target, now);
             }
-            String external = active == null ? order.getAccount().getId().toString() : access.getExternalAccessId();
+            String external = action == PaymentActivationAction.PROVISION
+                    ? order.getAccount().getId().toString() : access.getExternalAccessId();
             result.add(new PreparedPaymentActivation(order.getId(), order.getAccount().getId(), order.getProvider(), action,
                     generation, token, order.getDurationDaysSnapshot(), target,
-                    active == null ? null : active.getId(), active == null ? null : access.getId(), external,
+                    active == null ? null : active.getId(), action == PaymentActivationAction.PROVISION ? null : access.getId(), external,
                     active == null ? null : active.getVersion(), active == null ? null : active.getExpiresAt(),
                     order.getStatus(), order.getActivationStatus(), order.getTariff().getId(),
                     order.getTariffCodeSnapshot(), order.getTariffNameSnapshot(), vpnProvider.providerName(),
-                    active == null ? null : access.getVersion(), active == null ? null : access.getStatus(),
-                    active == null ? null : access.getProviderName()));
+                    action == PaymentActivationAction.PROVISION ? null : access.getVersion(),
+                    action == PaymentActivationAction.PROVISION ? null : access.getStatus(),
+                    action == PaymentActivationAction.PROVISION ? null : access.getProviderName()));
         }
         return List.copyOf(result);
     }
@@ -157,6 +163,24 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 }
                 access.attachSubscription(subscription, now);
             }
+            access.requestPolicy(VpnEntitlement.PREMIUM, now, p.targetExpiresAt(), now);
+            accesses.save(access);
+            order.attachSubscription(subscription, now);
+        } else if (p.action() == PaymentActivationAction.ACTIVATE_EXISTING) {
+            VpnAccess access = accesses.findByIdForUpdate(p.existingVpnAccessId()).orElse(null);
+            if (access == null || !access.getAccount().getId().equals(order.getAccount().getId())
+                    || access.getStatus() != VpnAccessStatus.ACTIVE
+                    || !Objects.equals(access.getVersion(), p.existingVpnAccessVersion())
+                    || !Objects.equals(access.getProviderName(), p.existingVpnProviderName())
+                    || !Objects.equals(access.getExternalAccessId(), p.stableExternalClientId())
+                    || !Objects.equals(result.externalAccessId(), access.getExternalAccessId())) {
+                return PaymentActivationOutcome.STALE;
+            }
+            subscription = Subscription.builder().id(UUID.randomUUID()).account(order.getAccount()).tariff(tariff)
+                    .status(SubscriptionStatus.ACTIVE).startsAt(now).expiresAt(p.targetExpiresAt())
+                    .activatedAt(now).createdAt(now).updatedAt(now).build();
+            subscriptions.save(subscription);
+            access.attachSubscription(subscription, now);
             access.requestPolicy(VpnEntitlement.PREMIUM, now, p.targetExpiresAt(), now);
             accesses.save(access);
             order.attachSubscription(subscription, now);

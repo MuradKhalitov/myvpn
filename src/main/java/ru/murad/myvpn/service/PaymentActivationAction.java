@@ -1,3 +1,3 @@
 package ru.murad.myvpn.service;
 
-public enum PaymentActivationAction { PROVISION, EXTEND }
+public enum PaymentActivationAction { PROVISION, ACTIVATE_EXISTING, EXTEND }
