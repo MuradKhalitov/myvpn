@@ -2,7 +2,9 @@ package ru.murad.myvpn.service.impl;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import ru.murad.myvpn.client.ProvisionedVpnAccess;
 import ru.murad.myvpn.client.VpnProvider;
+import ru.murad.myvpn.client.VpnProvisionRequest;
 import ru.murad.myvpn.client.VpnTrafficPolicy;
 import ru.murad.myvpn.config.VpnTrafficProperties;
 import ru.murad.myvpn.model.VpnEntitlement;
@@ -18,13 +20,15 @@ import java.util.UUID;
 @Slf4j
 public class VpnTrafficPolicyServiceImpl implements VpnTrafficPolicyService {
     private final VpnTrafficPolicyTransactionService transactions;
+    private final AccountVpnAccessTransactionService freeAccessTransactions;
     private final VpnProvider provider;
     private final VpnTrafficProperties properties;
     private final Clock clock;
 
-    public VpnTrafficPolicyServiceImpl(VpnTrafficPolicyTransactionService transactions, VpnProvider provider,
+    public VpnTrafficPolicyServiceImpl(VpnTrafficPolicyTransactionService transactions,
+            AccountVpnAccessTransactionService freeAccessTransactions, VpnProvider provider,
             VpnTrafficProperties properties, Clock clock) {
-        this.transactions = transactions; this.provider = provider;
+        this.transactions = transactions; this.freeAccessTransactions = freeAccessTransactions; this.provider = provider;
         this.properties = properties; this.clock = clock;
     }
 
@@ -34,8 +38,17 @@ public class VpnTrafficPolicyServiceImpl implements VpnTrafficPolicyService {
         int applied = 0;
         for (VpnTrafficPolicyCandidate candidate : transactions.due(now)) {
             try {
+                ProvisionedVpnAccess provisioned = candidate.requiresProvisioning()
+                        ? provider.provision(new VpnProvisionRequest(candidate.accountId(), 0L,
+                                candidate.provisioningExpiresAt(), candidate.externalAccessId(),
+                                candidate.providerClientKey()))
+                        : null;
                 provider.applyTrafficPolicy(candidate.externalAccessId(), candidate.providerClientKey(), policy(candidate.entitlement()));
-                if (transactions.complete(candidate.accessId(), candidate.generation(), now)) applied++;
+                boolean completed = candidate.requiresProvisioning()
+                        ? freeAccessTransactions.completeFree(candidate.accessId(), candidate.generation(),
+                                provisioned.providerName(), provisioned.configurationData(), now)
+                        : transactions.complete(candidate.accessId(), candidate.generation(), now);
+                if (completed) applied++;
                 else log.info("Stale VPN traffic policy result ignored accessId={} generation={}",
                         candidate.accessId(), candidate.generation());
             } catch (RuntimeException exception) {
@@ -43,7 +56,7 @@ public class VpnTrafficPolicyServiceImpl implements VpnTrafficPolicyService {
                     log.info("Stale VPN traffic policy failure ignored accessId={} generation={}",
                             candidate.accessId(), candidate.generation());
                 } else {
-                    log.warn("VPN traffic policy requires retry accessId={} entitlement={}",
+                    log.warn("VPN access reconciliation requires retry accessId={} entitlement={}",
                             candidate.accessId(), candidate.entitlement());
                 }
             }

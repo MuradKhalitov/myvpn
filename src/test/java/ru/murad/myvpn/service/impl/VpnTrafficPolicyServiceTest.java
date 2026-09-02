@@ -1,7 +1,10 @@
 package ru.murad.myvpn.service.impl;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import ru.murad.myvpn.client.VpnProvider;
+import ru.murad.myvpn.client.ProvisionedVpnAccess;
+import ru.murad.myvpn.client.VpnProvisionRequest;
 import ru.murad.myvpn.client.VpnTrafficPolicy;
 import ru.murad.myvpn.config.VpnTrafficProperties;
 import ru.murad.myvpn.model.VpnEntitlement;
@@ -19,8 +22,9 @@ import static org.mockito.Mockito.*;
 class VpnTrafficPolicyServiceTest {
     private final Instant now = Instant.parse("2026-08-31T00:00:00Z");
     private final VpnTrafficPolicyTransactionService transactions = mock(VpnTrafficPolicyTransactionService.class);
+    private final AccountVpnAccessTransactionService freeTransactions = mock(AccountVpnAccessTransactionService.class);
     private final VpnProvider provider = mock(VpnProvider.class);
-    private final VpnTrafficPolicyServiceImpl service = new VpnTrafficPolicyServiceImpl(transactions, provider,
+    private final VpnTrafficPolicyServiceImpl service = new VpnTrafficPolicyServiceImpl(transactions, freeTransactions, provider,
             new VpnTrafficProperties(5L * 1024 * 1024 * 1024, 30, 0), Clock.fixed(now, ZoneOffset.UTC));
 
     @Test void appliesConfiguredFreeBytesAndCompletesOnlyAfterProviderConfirmation() {
@@ -60,7 +64,54 @@ class VpnTrafficPolicyServiceTest {
         verify(provider, times(2)).applyTrafficPolicy("external", "acc_key", VpnTrafficPolicy.limited(5L * 1024 * 1024 * 1024));
     }
 
+    @Test void retriesInitialProvisioningWithStableIdentityAndCompletesFreeAccess() {
+        UUID accountId = UUID.randomUUID();
+        VpnTrafficPolicyCandidate c = provisioningCandidate(accountId, 7);
+        when(transactions.due(now)).thenReturn(List.of(c));
+        when(provider.provision(new VpnProvisionRequest(accountId, 0L, c.provisioningExpiresAt(), "external", "acc_key")))
+                .thenReturn(new ProvisionedVpnAccess("FAKE", "external", "config"));
+        when(freeTransactions.completeFree(c.accessId(), 7, "FAKE", "config", now)).thenReturn(true);
+
+        service.reconcileDuePolicies();
+
+        InOrder order = inOrder(provider, freeTransactions);
+        order.verify(provider).provision(new VpnProvisionRequest(accountId, 0L, c.provisioningExpiresAt(), "external", "acc_key"));
+        order.verify(provider).applyTrafficPolicy("external", "acc_key", VpnTrafficPolicy.limited(5L * 1024 * 1024 * 1024));
+        order.verify(freeTransactions).completeFree(c.accessId(), 7, "FAKE", "config", now);
+        verify(transactions, never()).complete(c.accessId(), 7, now);
+    }
+
+    @Test void initialProvisioningFailureSchedulesRetryWithoutCompleting() {
+        VpnTrafficPolicyCandidate c = provisioningCandidate(UUID.randomUUID(), 8);
+        when(transactions.due(now)).thenReturn(List.of(c));
+        doThrow(new RuntimeException("timeout")).when(provider).provision(any());
+        when(transactions.retry(c.accessId(), 8, now)).thenReturn(true);
+
+        service.reconcileDuePolicies();
+
+        verify(provider, never()).applyTrafficPolicy(any(), any(), any());
+        verify(freeTransactions, never()).completeFree(any(), anyLong(), any(), any(), any());
+        verify(transactions).retry(c.accessId(), 8, now);
+    }
+
+    @Test void staleInitialProvisioningResultCannotOverwriteNewerGeneration() {
+        VpnTrafficPolicyCandidate c = provisioningCandidate(UUID.randomUUID(), 9);
+        when(transactions.due(now)).thenReturn(List.of(c));
+        when(provider.provision(any())).thenReturn(new ProvisionedVpnAccess("FAKE", "external", "config"));
+        when(freeTransactions.completeFree(c.accessId(), 9, "FAKE", "config", now)).thenReturn(false);
+
+        service.reconcileDuePolicies();
+
+        verify(freeTransactions).completeFree(c.accessId(), 9, "FAKE", "config", now);
+        verify(transactions, never()).retry(any(), anyLong(), any());
+    }
+
     private VpnTrafficPolicyCandidate candidate(VpnEntitlement entitlement, long generation) {
         return new VpnTrafficPolicyCandidate(UUID.randomUUID(), "external", "acc_key", entitlement, generation);
+    }
+
+    private VpnTrafficPolicyCandidate provisioningCandidate(UUID accountId, long generation) {
+        return new VpnTrafficPolicyCandidate(UUID.randomUUID(), accountId, "external", "acc_key",
+                VpnEntitlement.FREE, generation, now.plusSeconds(100), true);
     }
 }

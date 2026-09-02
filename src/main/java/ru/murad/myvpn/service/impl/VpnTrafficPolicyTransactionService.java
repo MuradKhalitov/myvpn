@@ -4,6 +4,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.murad.myvpn.model.VpnEntitlement;
 import ru.murad.myvpn.model.VpnPolicyStatus;
+import ru.murad.myvpn.model.VpnAccessStatus;
 import ru.murad.myvpn.repository.VpnAccessRepository;
 import ru.murad.myvpn.service.VpnTrafficPolicyCandidate;
 
@@ -23,10 +24,14 @@ public class VpnTrafficPolicyTransactionService {
     public List<VpnTrafficPolicyCandidate> due(Instant now) {
         return accesses.findTop50ByPolicyStatusInAndNextPolicyAttemptAtLessThanEqualOrderByUpdatedAt(
                         List.of(VpnPolicyStatus.PENDING, VpnPolicyStatus.RETRY_REQUIRED), now)
-                .stream().filter(access -> access.getStatus() != ru.murad.myvpn.model.VpnAccessStatus.REVOKED
+                .stream().filter(access -> access.getStatus() != VpnAccessStatus.REVOKED
                         && access.getProviderClientKey() != null)
-                .map(access -> new VpnTrafficPolicyCandidate(access.getId(), access.getExternalAccessId(), access.getProviderClientKey(),
-                        access.getDesiredEntitlement(), access.getPolicyGeneration())).toList();
+                .map(access -> new VpnTrafficPolicyCandidate(access.getId(), access.getAccount().getId(),
+                        access.getExternalAccessId(), access.getProviderClientKey(), access.getDesiredEntitlement(),
+                        access.getPolicyGeneration(), access.getIssuedAt().plus(
+                                AccountVpnAccessServiceImpl.FREE_PROVISIONING_DURATION_DAYS, ChronoUnit.DAYS),
+                        access.getStatus() == VpnAccessStatus.PROVISIONING))
+                .toList();
     }
 
     @Transactional
@@ -34,8 +39,9 @@ public class VpnTrafficPolicyTransactionService {
             Instant quotaStart, Instant quotaEnd, Instant now) {
         return accesses.findByAccountId(accountId).map(access -> {
             access.requestPolicy(entitlement, quotaStart, quotaEnd, now);
-            return new VpnTrafficPolicyCandidate(access.getId(), access.getExternalAccessId(), access.getProviderClientKey(),
-                    access.getDesiredEntitlement(), access.getPolicyGeneration());
+            return new VpnTrafficPolicyCandidate(access.getId(), access.getAccount().getId(),
+                    access.getExternalAccessId(), access.getProviderClientKey(), access.getDesiredEntitlement(),
+                    access.getPolicyGeneration(), null, false);
         });
     }
 
