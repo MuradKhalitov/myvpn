@@ -55,7 +55,7 @@ class YooKassaPaymentProviderWireMockTest {
     void tearDown() { server.stop(); }
 
     @Test
-    void createPendingRedirectSendsBasicAuthStableIdempotenceAndMetadata() {
+    void createAcceptsProductionModePaymentResponseAndSendsBasicAuthStableIdempotenceAndMetadata() {
         server.stubFor(post(urlEqualTo("/payments")).willReturn(json(payment("pending", false))));
 
         var created = provider.createPayment(command());
@@ -68,6 +68,15 @@ class YooKassaPaymentProviderWireMockTest {
                 .withRequestBody(com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath("$.capture", equalTo("true")))
                 .withRequestBody(com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath("$.amount.currency", equalTo("RUB")))
                 .withRequestBody(com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath("$.metadata.payment_order_id", equalTo(orderId.toString()))));
+    }
+
+    @Test
+    void createAcceptsTestPaymentResponse() {
+        server.stubFor(post(urlEqualTo("/payments")).willReturn(json(paymentWithTest(true))));
+
+        var created = provider.createPayment(command());
+
+        assertThat(created.providerPaymentId()).isEqualTo("payment-1");
     }
 
     @Test
@@ -95,12 +104,44 @@ class YooKassaPaymentProviderWireMockTest {
     }
 
     @Test
-    void rejectsMalformedOrMismatchedCreationResponse() {
+    void rejectsMalformedCreationResponse() {
         server.stubFor(post(urlEqualTo("/payments")).willReturn(json("{not-json")));
         assertThatThrownBy(() -> provider.createPayment(command())).isInstanceOf(PaymentProviderPermanentException.class);
-        server.resetAll();
-        server.stubFor(post(urlEqualTo("/payments")).willReturn(json(paymentWithAmount("99.00"))));
-        assertThatThrownBy(() -> provider.createPayment(command())).isInstanceOf(PaymentProviderPermanentException.class);
+    }
+
+    @Test
+    void rejectsCreationResponseWithBlankId() {
+        rejectsCreationResponse(payment().replace("\"id\":\"payment-1\"", "\"id\":\" \""));
+    }
+
+    @Test
+    void rejectsCreationResponseWithInvalidAmount() {
+        rejectsCreationResponse(paymentWithAmount("not-a-number"));
+    }
+
+    @Test
+    void rejectsCreationResponseWithMismatchedAmount() {
+        rejectsCreationResponse(paymentWithAmount("99.00"));
+    }
+
+    @Test
+    void rejectsCreationResponseWithNonRubCurrency() {
+        rejectsCreationResponse(payment().replace("\"currency\":\"RUB\"", "\"currency\":\"USD\""));
+    }
+
+    @Test
+    void rejectsCreationResponseWithWrongMetadataOrderId() {
+        rejectsCreationResponse(payment().replace(orderId.toString(), "10000000-0000-0000-0000-000000000002"));
+    }
+
+    @Test
+    void rejectsCreationResponseWithInvalidMetadataOrderId() {
+        rejectsCreationResponse(payment().replace(orderId.toString(), "not-a-uuid"));
+    }
+
+    @Test
+    void rejectsCreationResponseWithInvalidCreatedAt() {
+        rejectsCreationResponse(payment().replace("2026-07-27T10:00:00Z", "not-an-instant"));
     }
 
     @Test
@@ -147,15 +188,22 @@ class YooKassaPaymentProviderWireMockTest {
         return aResponse().withStatus(200).withHeader("Content-Type", "application/json").withBody(body);
     }
 
-    private String payment(String status, boolean paid) { return paymentWithAmount("100.00").replace("\"pending\"", "\"" + status + "\"")
+    private void rejectsCreationResponse(String response) {
+        server.stubFor(post(urlEqualTo("/payments")).willReturn(json(response)));
+        assertThatThrownBy(() -> provider.createPayment(command())).isInstanceOf(PaymentProviderPermanentException.class);
+    }
+
+    private String payment() { return paymentWithAmount("100.00"); }
+    private String payment(String status, boolean paid) { return payment().replace("\"pending\"", "\"" + status + "\"")
             .replace("\"paid\":false", "\"paid\":" + paid); }
+    private String paymentWithTest(boolean test) { return payment().replace("\"test\":false", "\"test\":" + test); }
     private String paymentWithAmount(String amount) {
         return ("{\"id\":\"payment-1\",\"status\":\"pending\",\"paid\":false,"
                 + "\"amount\":{\"value\":\"%s\",\"currency\":\"RUB\"},"
                 + "\"confirmation\":{\"type\":\"redirect\",\"confirmation_url\":\"https://yookassa.test/confirm\"},"
                 + "\"created_at\":\"2026-07-27T10:00:00Z\","
                 + "\"metadata\":{\"payment_order_id\":\"%s\"},"
-                + "\"recipient\":{\"account_id\":\"test-shop\"},\"test\":true}")
+                + "\"recipient\":{\"account_id\":\"test-shop\"},\"test\":false}")
                 .formatted(amount, orderId);
     }
 }

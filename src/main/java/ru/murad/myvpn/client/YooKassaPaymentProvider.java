@@ -167,7 +167,7 @@ public class YooKassaPaymentProvider implements PaymentProvider {
                 || decimal(node.path("amount").path("value")).compareTo(command.amount()) != 0
                 || !"RUB".equals(text(node.path("amount").path("currency")))
                 || !command.paymentOrderId().equals(uuid(node.path("metadata").path("payment_order_id")))
-                || !node.path("test").asBoolean(false) || instant(node.path("created_at")) == null) {
+                || instant(node.path("created_at")) == null) {
             throw new PaymentProviderPermanentException("YooKassa payment object does not match the order");
         }
     }
