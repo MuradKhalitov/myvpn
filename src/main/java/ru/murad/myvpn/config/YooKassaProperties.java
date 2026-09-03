@@ -17,6 +17,9 @@ public record YooKassaProperties(
         Duration retryAfterMin,
         Duration retryAfterMax
 ) {
+    public YooKassaProperties {
+        returnUrl = YooKassaReturnUrlValidator.validate(returnUrl);
+    }
     @Override
     public String toString() {
         return "YooKassaProperties[configured=" + configured() + ", secretKeyRedacted=true]";

@@ -125,7 +125,10 @@ public class PaymentVerificationTransactionServiceImpl implements PaymentVerific
         return null;
     }
     private PreparedPaymentVerification snapshot(PaymentOrder p) { return new PreparedPaymentVerification(p.getId(), p.getAccount().getId(), p.getProvider(), p.getProviderPaymentId(), p.getAmount(), p.getCurrency(), p.getTariff().getId(), p.getTariffCodeSnapshot(), p.getTariffNameSnapshot(), p.getDurationDaysSnapshot(), p.getStatus(), p.getIdempotenceKey()); }
-    private PaymentVerificationResult result(PaymentOrder p, PaymentVerificationOutcome o) { return new PaymentVerificationResult(o, p.getStatus(), p.getActivationStatus(), p.getPaidAt(), p.getNextVerificationAt()); }
+    private PaymentVerificationResult result(PaymentOrder p, PaymentVerificationOutcome o) {
+        return new PaymentVerificationResult(p.getId(), o, p.getStatus(), p.getActivationStatus(),
+                p.getPaidAt(), p.getNextVerificationAt(), p.getExpiresAt());
+    }
     private boolean snapshotMatches(PaymentOrder o, PreparedPaymentVerification e) {
         return o.getId().equals(e.paymentOrderId()) && o.getAccount().getId().equals(e.accountId())
                 && o.getProvider() == e.provider() && java.util.Objects.equals(o.getProviderPaymentId(), e.providerPaymentId())

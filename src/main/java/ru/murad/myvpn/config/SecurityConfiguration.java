@@ -37,7 +37,11 @@ public class SecurityConfiguration {
     public SecurityWebFilterChain existingApplicationSecurity(ServerHttpSecurity http) {
         return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
-                .authorizeExchange(exchanges -> exchanges.anyExchange().permitAll())
+                .authorizeExchange(exchanges -> exchanges
+                        .pathMatchers("/actuator/health",
+                                "/api/payments/yookassa/webhook",
+                                "/api/payments/yookassa/return").permitAll()
+                        .anyExchange().denyAll())
                 .build();
     }
 }

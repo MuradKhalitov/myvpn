@@ -20,7 +20,7 @@ import ru.murad.myvpn.service.PaymentOrderCreationService;
 
 @Service @RequiredArgsConstructor
 public class PaymentOrderCreationServiceImpl implements PaymentOrderCreationService {
-    private static final String OPEN_ORDER_CONSTRAINT = "uk_payment_order_open_user";
+    private static final String OPEN_ORDER_CONSTRAINT = "uk_payment_order_open_account";
     private final AccountRepository accountRepository;
     private final VpnTariffRepository tariffRepository;
     private final PaymentOrderRepository paymentOrderRepository;

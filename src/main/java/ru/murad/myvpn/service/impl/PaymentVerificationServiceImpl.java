@@ -35,7 +35,7 @@ public class PaymentVerificationServiceImpl implements PaymentVerificationServic
             return transactions.retryLater(expected, retryable.retryAfter()
                     .orElse(properties.verification().minInterval()), clock.instant());
         } catch (PaymentProviderUncertainException | PaymentProviderPermanentException ex) {
-            return new PaymentVerificationResult(PaymentVerificationOutcome.PROVIDER_UNAVAILABLE, PaymentStatus.PENDING, PaymentActivationStatus.NOT_READY, null, null);
+            return unavailable(expected);
         }
         return afterProviderGet(expected, actual);
     }
@@ -54,8 +54,7 @@ public class PaymentVerificationServiceImpl implements PaymentVerificationServic
         } catch (PaymentNotFoundException exception) {
             return transactions.manualReview(expected, "PROVIDER_PAYMENT_NOT_FOUND", clock.instant());
         } catch (PaymentProviderUncertainException | PaymentProviderPermanentException exception) {
-            return new PaymentVerificationResult(PaymentVerificationOutcome.PROVIDER_UNAVAILABLE,
-                    PaymentStatus.PENDING, PaymentActivationStatus.NOT_READY, null, null);
+            return unavailable(expected);
         }
     }
 
@@ -70,10 +69,16 @@ public class PaymentVerificationServiceImpl implements PaymentVerificationServic
                 return transactions.manualReview(
                         expected, invalid.safeFailureCode(), clock.instant());
             }
-            return new PaymentVerificationResult(
+            return new PaymentVerificationResult(expected.paymentOrderId(),
                     PaymentVerificationOutcome.PROVIDER_RESULT_UNCERTAIN,
-                    PaymentStatus.PENDING, PaymentActivationStatus.NOT_READY, null, null);
+                    PaymentStatus.PENDING, PaymentActivationStatus.NOT_READY, null, null, null);
         }
         return transactions.apply(expected, actual, clock.instant());
+    }
+
+    private PaymentVerificationResult unavailable(PreparedPaymentVerification expected) {
+        return new PaymentVerificationResult(expected.paymentOrderId(),
+                PaymentVerificationOutcome.PROVIDER_UNAVAILABLE,
+                PaymentStatus.PENDING, PaymentActivationStatus.NOT_READY, null, null, null);
     }
 }

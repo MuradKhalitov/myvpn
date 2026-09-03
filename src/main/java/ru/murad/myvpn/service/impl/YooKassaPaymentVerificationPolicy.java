@@ -6,6 +6,7 @@ import ru.murad.myvpn.dto.PreparedPaymentVerification;
 import ru.murad.myvpn.dto.ProviderPayment;
 import ru.murad.myvpn.exception.ProviderPaymentValidationException;
 import ru.murad.myvpn.model.PaymentProviderType;
+import ru.murad.myvpn.config.YooKassaProperties;
 import ru.murad.myvpn.service.ProviderPaymentVerificationPolicy;
 
 import java.time.Instant;
@@ -13,6 +14,11 @@ import java.time.Instant;
 @Component
 @ConditionalOnProperty(name = "payment.provider", havingValue = "yookassa")
 public class YooKassaPaymentVerificationPolicy implements ProviderPaymentVerificationPolicy {
+    private final YooKassaProperties properties;
+
+    public YooKassaPaymentVerificationPolicy(YooKassaProperties properties) {
+        this.properties = properties;
+    }
     @Override
     public PaymentProviderType providerType() {
         return PaymentProviderType.YOOKASSA;
@@ -20,7 +26,7 @@ public class YooKassaPaymentVerificationPolicy implements ProviderPaymentVerific
 
     @Override
     public void validate(PreparedPaymentVerification expected, ProviderPayment actual, Instant now) {
-        if (actual.recipientAccountId() == null || actual.recipientAccountId().isBlank()) {
+        if (!properties.shopId().equals(actual.recipientAccountId())) {
             throw new ProviderPaymentValidationException("PAYMENT_RECIPIENT_MISMATCH", true);
         }
     }
