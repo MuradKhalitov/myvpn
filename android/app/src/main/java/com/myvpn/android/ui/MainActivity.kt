@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.myvpn.android.MyVpnApplication
 import com.myvpn.android.data.Session
@@ -99,24 +100,27 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -
 
 @Composable
 private fun PhoneEntry(state: MainUiState.PhoneEntry, vm: MainViewModel) {
-    var phone by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf(TextFieldValue("")) }
+    val phoneInput = PhoneNumberInput(phone.text)
     Text("Войдите по номеру телефона", style = MaterialTheme.typography.headlineSmall)
     Spacer(Modifier.height(8.dp))
     Text("Подтвердим номер бесплатным звонком. Это займёт меньше минуты.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
     Spacer(Modifier.height(28.dp))
     OutlinedTextField(
         value = phone,
-        onValueChange = { phone = PresentationFormatter.formatPhoneInput(it) },
+        onValueChange = { phone = PhoneNumberInputFormatter.normalize(it) },
         modifier = Modifier.fillMaxWidth(),
         label = { Text("Номер телефона") },
-        placeholder = { Text("+7 999 123-45-67") },
+        prefix = { Text(phoneInput.prefix) },
+        placeholder = { Text(phoneInput.placeholder) },
+        visualTransformation = PhoneNumberVisualTransformation,
         singleLine = true,
         isError = state.validationMessage != null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done)
     )
     state.validationMessage?.let { Text(it, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
     Spacer(Modifier.height(20.dp))
-    Button(onClick = { vm.startPhoneVerification(phone) }, modifier = Modifier.fillMaxWidth(), enabled = phone.filter(Char::isDigit).length == 11) { Text("Продолжить") }
+    Button(onClick = { vm.startPhoneVerification(phoneInput.canonical) }, modifier = Modifier.fillMaxWidth(), enabled = phoneInput.isComplete) { Text("Продолжить") }
 }
 
 @Composable
