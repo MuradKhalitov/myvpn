@@ -17,6 +17,7 @@ import ru.murad.myvpn.client.threexui.ThreeXUiInboundSettings;
 import ru.murad.myvpn.client.threexui.ThreeXUiVlessClient;
 import ru.murad.myvpn.config.ThreeXUiProperties;
 import ru.murad.myvpn.exception.ThreeXUiException;
+import ru.murad.myvpn.repository.AccountIdentityRepository;
 
 import java.net.URI;
 import java.time.Duration;
@@ -33,6 +34,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 
 class ThreeXUiInboundClientWireMockTest {
 
@@ -423,7 +425,8 @@ class ThreeXUiInboundClientWireMockTest {
                 new ThreeXUiConfigurationMapper(
                         new ObjectMapper(), properties(),
                         () -> "/fixedSpiderPath"),
-                properties());
+                properties(),
+                mock(AccountIdentityRepository.class));
 
         assertThatThrownBy(() -> provider.provision(new VpnProvisionRequest(
                 java.util.UUID.randomUUID(), 1L, java.time.Instant.now())))
@@ -763,7 +766,8 @@ class ThreeXUiInboundClientWireMockTest {
                 new ThreeXUiConfigurationMapper(
                         new ObjectMapper(), configured,
                         () -> "/fixedSpiderPath"),
-                configured);
+                configured,
+                mock(AccountIdentityRepository.class));
     }
 
     private String inboundPath() {

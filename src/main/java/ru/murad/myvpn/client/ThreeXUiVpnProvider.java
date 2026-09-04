@@ -85,12 +85,6 @@ public class ThreeXUiVpnProvider implements VpnProvider {
         this.identities = identities;
     }
 
-    /** Compatibility constructor for focused provider tests without persistence. */
-    public ThreeXUiVpnProvider(ThreeXUiInboundClient inboundClient, VpnConfigurationFactory configurationFactory,
-            ThreeXUiConfigurationMapper configurationMapper, ThreeXUiProperties properties) {
-        this(inboundClient, configurationFactory, configurationMapper, properties, null);
-    }
-
     @Override
     public ProvisionedVpnAccess provision(VpnProvisionRequest request) {
         ThreeXUiRequestBudget budget =
