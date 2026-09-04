@@ -8,10 +8,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PhoneNumberInputTest {
-    @Test fun emptyInputHasFixedPrefixAndSuffixPlaceholder() {
+    @Test fun emptyInputHasFixedPrefixAndEmptySubscriberPart() {
         val input = PhoneNumberInputFormatter.fromUserInput("")
         assertEquals("+7", input.prefix)
-        assertEquals("999-123-45-67", input.placeholder)
         assertEquals("", input.formatted)
         assertFalse(input.isComplete)
     }

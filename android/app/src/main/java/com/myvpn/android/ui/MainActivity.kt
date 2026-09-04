@@ -112,7 +112,6 @@ private fun PhoneEntry(state: MainUiState.PhoneEntry, vm: MainViewModel) {
         modifier = Modifier.fillMaxWidth(),
         label = { Text("Номер телефона") },
         prefix = { Text(phoneInput.prefix) },
-        placeholder = { Text(phoneInput.placeholder) },
         visualTransformation = PhoneNumberVisualTransformation,
         singleLine = true,
         isError = state.validationMessage != null,

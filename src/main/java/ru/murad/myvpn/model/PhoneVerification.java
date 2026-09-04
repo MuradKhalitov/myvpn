@@ -28,6 +28,8 @@ public class PhoneVerification {
     @Column(name = "request_ip", length = 64) private String requestIp;
     @Column(name = "provider", nullable = false, length = 32) private String provider;
     @Column(name = "provider_check_id", nullable = false, unique = true, length = 128) private String providerCheckId;
+    @Column(name = "call_phone", length = 32) private String callPhone;
+    @Column(name = "call_phone_pretty", length = 64) private String callPhonePretty;
     @Enumerated(EnumType.STRING) @Column(nullable = false, length = 16) private PhoneVerificationStatus status;
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Column(name = "expires_at", nullable = false) private Instant expiresAt;

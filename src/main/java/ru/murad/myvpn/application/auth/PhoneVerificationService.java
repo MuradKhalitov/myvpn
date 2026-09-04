@@ -28,22 +28,27 @@ public class PhoneVerificationService {
 
     @Transactional public PhoneVerificationStartResponse start(String phone, String requestIp) {
         String normalized = normalizer.normalize(phone); Instant now = clock.instant(); verifications.lockPhone(normalized);
+        var active = verifications.findFirstByPhoneAndStatusOrderByCreatedAtDesc(normalized, PhoneVerificationStatus.PENDING)
+                .filter(value -> value.activeAt(now));
+        if (active.isPresent()) return response(active.get());
         if (verifications.findFirstByPhoneOrderByCreatedAtDesc(normalized)
                 .filter(value -> value.getCreatedAt().plus(Duration.ofMinutes(1)).isAfter(now)).isPresent()
                 || verifications.countByPhoneAndCreatedAtAfter(normalized, now.minus(Duration.ofMinutes(15))) >= 3
                 || requestIp != null && verifications.countByRequestIpAndCreatedAtAfter(requestIp, now.minus(Duration.ofMinutes(15))) >= 10) {
             throw new InvalidAuthenticationException();
         }
-        if (verifications.findFirstByPhoneAndStatusOrderByCreatedAtDesc(normalized, PhoneVerificationStatus.PENDING)
-                .filter(value -> value.getExpiresAt().isAfter(now)).isPresent()) throw new InvalidAuthenticationException();
         return create(normalized, requestIp, provider.start(normalized));
     }
     private PhoneVerificationStartResponse create(String phone, String requestIp, PhoneVerificationStart started) {
         Instant now = clock.instant();
         PhoneVerification verification = verifications.save(PhoneVerification.builder().id(UUID.randomUUID()).phone(phone).requestIp(requestIp)
                 .provider("SMS_RU").providerCheckId(started.externalCheckId()).status(PhoneVerificationStatus.PENDING)
+                .callPhone(started.callPhone()).callPhonePretty(started.callPhonePretty())
                 .createdAt(now).expiresAt(started.expiresAt()).build());
-        return new PhoneVerificationStartResponse(verification.getId(), started.callPhone(), started.callPhonePretty(), verification.getExpiresAt());
+        return response(verification);
+    }
+    private PhoneVerificationStartResponse response(PhoneVerification verification) {
+        return new PhoneVerificationStartResponse(verification.getId(), verification.getCallPhone(), verification.getCallPhonePretty(), verification.getExpiresAt());
     }
     @Transactional public PhoneVerificationStatusResponse status(UUID id) {
         PhoneVerification verification = verifications.findById(id).orElseThrow(InvalidAuthenticationException::new);

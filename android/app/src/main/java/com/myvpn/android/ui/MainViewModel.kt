@@ -10,6 +10,7 @@ import com.myvpn.android.data.VpnAccessResponse
 import com.myvpn.android.data.VpnAccessSource
 import com.myvpn.android.vpn.VpnConnectionState
 import com.myvpn.android.vpn.VpnEngine
+import java.time.Instant
 import java.io.IOException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -19,7 +20,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
-enum class AppError { NETWORK_UNAVAILABLE, BACKEND_UNAVAILABLE, VERIFICATION_EXPIRED, VERIFICATION_FAILED, EXCHANGE_FAILED, VPN_PROVISIONING_FAILED, SESSION_EXPIRED }
+enum class AppError { NETWORK_UNAVAILABLE, BACKEND_UNAVAILABLE, PHONE_START_REJECTED, VERIFICATION_EXPIRED, VERIFICATION_FAILED, EXCHANGE_FAILED, VPN_PROVISIONING_FAILED, SESSION_EXPIRED }
 
 sealed interface MainUiState {
     data object Initializing : MainUiState
@@ -40,11 +41,19 @@ class MainViewModel(
     private val auth: PhoneAuthSource,
     private val access: VpnAccessSource,
     private val engine: VpnEngine,
-    private val pollDelayMillis: Long = 2_000
+    private val pollDelayMillis: Long = 2_000,
+    private val now: () -> Instant = Instant::now
 ) : ViewModel() {
     private val _state = MutableStateFlow<MainUiState>(MainUiState.Initializing)
     val state = _state.asStateFlow()
-    private var verification: PhoneVerificationStartResponse? = null
+    private data class ActivePhoneVerification(
+        val canonicalPhone: String,
+        val response: PhoneVerificationStartResponse
+    ) {
+        fun isPendingAt(now: Instant): Boolean = runCatching { Instant.parse(response.expiresAt).isAfter(now) }.getOrDefault(false)
+    }
+
+    private var activeVerification: ActivePhoneVerification? = null
     private var session: Session? = null
     private var configuration: String? = null
     private var ready: VpnAccessResponse? = null
@@ -83,24 +92,39 @@ class MainViewModel(
     }
 
     fun startPhoneVerification(phone: String) {
-        if (!isPhoneValid(phone)) {
+        val canonicalPhone = PhoneNumberInputFormatter.fromUserInput(phone).canonical
+        if (!isPhoneValid(canonicalPhone)) {
             _state.value = MainUiState.PhoneEntry("Введите номер в формате +7 999 123-45-67")
             return
         }
+        val existing = activeVerification
+        if (existing != null && !existing.isPendingAt(now())) {
+            activeVerification = null
+        } else if (existing?.canonicalPhone == canonicalPhone) {
+            stopPhoneVerificationPolling()
+            _state.value = MainUiState.PhoneVerification(existing.response, waitingForCall = true)
+            return
+        }
         viewModelScope.launch {
-            runCatching { auth.startVerification(phone) }
+            runCatching { auth.startVerification(canonicalPhone) }
                 .onSuccess { started ->
-                    verification = started
+                    activeVerification = ActivePhoneVerification(canonicalPhone, started)
                     exchangeStarted = false
                     _state.value = MainUiState.PhoneVerification(started, waitingForCall = true)
                 }
-                .onFailure { _state.value = errorFor(it, AppError.BACKEND_UNAVAILABLE) }
+                .onFailure { _state.value = phoneStartErrorFor(it) }
         }
     }
 
     /** Called only after the system dialer returns. A single job owns status polling. */
     fun onReturnedFromDialer() {
-        val current = verification ?: return
+        val active = activeVerification ?: return
+        if (!active.isPendingAt(now())) {
+            activeVerification = null
+            _state.value = MainUiState.Error(AppError.VERIFICATION_EXPIRED, "Время подтверждения звонка истекло", true)
+            return
+        }
+        val current = active.response
         if (pollingJob?.isActive == true || exchangeStarted) return
         pollingJob = viewModelScope.launch {
             _state.value = MainUiState.PhoneVerification(current, waitingForCall = false, message = "Ожидаем подтверждение звонка")
@@ -110,6 +134,7 @@ class MainViewModel(
                     _state.value = errorFor(it, AppError.BACKEND_UNAVAILABLE)
                     return@launch
                 }
+                if (response.status == "EXPIRED" || response.status == "FAILED") activeVerification = null
                 when (response.status) {
                         "PENDING" -> delay(pollDelayMillis)
                         "VERIFIED" -> {
@@ -118,6 +143,7 @@ class MainViewModel(
                                 _state.value = MainUiState.Error(AppError.EXCHANGE_FAILED, "Подтверждение не содержит токен входа", true)
                             } else {
                                 exchangeStarted = true
+                                activeVerification = null
                                 exchange(current.verificationId, exchangeToken)
                             }
                             return@launch
@@ -135,8 +161,6 @@ class MainViewModel(
 
     fun changePhoneNumber() {
         stopPhoneVerificationPolling()
-        verification = null
-        exchangeStarted = false
         _state.value = MainUiState.PhoneEntry()
     }
 
@@ -157,7 +181,7 @@ class MainViewModel(
             is MainUiState.PhoneEntry -> _state.value = MainUiState.PhoneEntry()
             is MainUiState.PhoneVerification -> onReturnedFromDialer()
             is MainUiState.Error -> when (current.type) {
-                AppError.VERIFICATION_EXPIRED, AppError.VERIFICATION_FAILED -> { verification = null; exchangeStarted = false; _state.value = MainUiState.PhoneEntry() }
+                AppError.VERIFICATION_EXPIRED, AppError.VERIFICATION_FAILED -> { activeVerification = null; exchangeStarted = false; _state.value = MainUiState.PhoneEntry() }
                 AppError.EXCHANGE_FAILED -> { exchangeStarted = false; onReturnedFromDialer() }
                 AppError.SESSION_EXPIRED -> restoreAuth()
                 else -> if (session == null) _state.value = MainUiState.PhoneEntry() else loadVpn()
@@ -209,7 +233,17 @@ class MainViewModel(
 
     override fun onCleared() { stopPhoneVerificationPolling(); vpnJob?.cancel(); super.onCleared() }
 
-    private fun isPhoneValid(value: String): Boolean { val digits = value.filter(Char::isDigit); return digits.length in 10..15 && (value.startsWith("+") || digits.startsWith("7")) }
+    private fun isPhoneValid(value: String): Boolean = PhoneNumberInputFormatter.fromUserInput(value).isComplete
+    private fun phoneStartErrorFor(error: Throwable): MainUiState.Error = when (error) {
+        is IOException -> MainUiState.Error(AppError.NETWORK_UNAVAILABLE, "Нет подключения к интернету", true)
+        is HttpException -> when {
+            error.code() >= 500 -> MainUiState.Error(AppError.BACKEND_UNAVAILABLE, "Сервис временно недоступен", true)
+            // The current API uses 401/INVALID_AUTHENTICATION for both active and throttled starts.
+            error.code() == 401 -> MainUiState.Error(AppError.PHONE_START_REJECTED, "Для этого номера уже запущено подтверждение или нужно немного подождать", true)
+            else -> MainUiState.Error(AppError.PHONE_START_REJECTED, "Не удалось начать подтверждение номера", true)
+        }
+        else -> MainUiState.Error(AppError.PHONE_START_REJECTED, "Не удалось начать подтверждение номера", true)
+    }
     private fun errorFor(error: Throwable, fallback: AppError): MainUiState.Error = when (error) {
         is IOException -> MainUiState.Error(AppError.NETWORK_UNAVAILABLE, "Нет подключения к сети", true)
         is HttpException -> MainUiState.Error(if (error.code() >= 500) AppError.BACKEND_UNAVAILABLE else fallback, if (error.code() >= 500) "Сервис временно недоступен" else "Не удалось выполнить запрос", true)

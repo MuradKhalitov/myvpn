@@ -13,12 +13,10 @@ data class PhoneNumberInput(val subscriberDigits: String) {
     val canonical: String get() = "+7$subscriberDigits"
     val isComplete: Boolean get() = subscriberDigits.length == 10
     val prefix: String get() = PhoneNumberInputFormatter.prefix
-    val placeholder: String get() = PhoneNumberInputFormatter.placeholder
 }
 
 object PhoneNumberInputFormatter {
     const val prefix = "+7"
-    const val placeholder = "999-123-45-67"
 
     fun fromUserInput(value: String): PhoneNumberInput = PhoneNumberInput(normalize(value))
 

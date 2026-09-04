@@ -9,6 +9,7 @@ import com.myvpn.android.data.VpnAccessResponse
 import com.myvpn.android.data.VpnAccessSource
 import com.myvpn.android.vpn.VpnConnectionState
 import com.myvpn.android.vpn.VpnEngine
+import java.time.Instant
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
+import retrofit2.HttpException
+import retrofit2.Response
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModelTest {
@@ -74,6 +79,82 @@ class MainViewModelTest {
         advanceUntilIdle()
         assertEquals(1, auth.starts)
         assertTrue(vm.state.value is MainUiState.PhoneVerification)
+    }
+
+    @Test fun samePhoneReusesPendingVerificationAfterChangingNumber() = runTest {
+        val auth = FakeAuth(restored = null)
+        val vm = startVerification(auth)
+        val original = (vm.state.value as MainUiState.PhoneVerification).verification
+        vm.changePhoneNumber()
+        vm.startPhoneVerification("+7 (999) 123-45-67")
+        advanceUntilIdle()
+
+        val reused = (vm.state.value as MainUiState.PhoneVerification).verification
+        assertEquals(1, auth.starts)
+        assertEquals(original.verificationId, reused.verificationId)
+        assertEquals(original.callPhone, reused.callPhone)
+        assertEquals(original.expiresAt, reused.expiresAt)
+    }
+
+    @Test fun formattedAndPastedFormsOfSamePhoneReusePendingVerification() = runTest {
+        val auth = FakeAuth(restored = null)
+        val vm = viewModel(auth, FakeAccess())
+        advanceUntilIdle()
+        vm.startPhoneVerification("9633751002")
+        advanceUntilIdle()
+        listOf("89633751002", "+7 (963) 375-10-02", "9633751002").forEach { input ->
+            vm.changePhoneNumber()
+            vm.startPhoneVerification(input)
+            advanceUntilIdle()
+        }
+        assertEquals(1, auth.starts)
+        assertEquals(listOf("+79633751002"), auth.startedPhones)
+    }
+
+    @Test fun differentPhoneStartsNewVerification() = runTest {
+        val auth = FakeAuth(restored = null)
+        val vm = startVerification(auth)
+        vm.changePhoneNumber()
+        vm.startPhoneVerification("+7 963 375-10-02")
+        advanceUntilIdle()
+        assertEquals(2, auth.starts)
+        assertEquals(listOf("+79991234567", "+79633751002"), auth.startedPhones)
+    }
+
+    @Test fun expiredPendingVerificationIsNotReused() = runTest {
+        val expired = PhoneVerificationStartResponse("old", "+79990000000", "+7 999 000-00-00", "2026-08-01T00:00:00Z")
+        val auth = FakeAuth(restored = null, started = expired)
+        val vm = viewModel(auth, FakeAccess())
+        advanceUntilIdle()
+        vm.startPhoneVerification("+79990000000")
+        advanceUntilIdle()
+        vm.changePhoneNumber()
+        vm.startPhoneVerification("+79990000000")
+        advanceUntilIdle()
+        assertEquals(2, auth.starts)
+    }
+
+    @Test fun reusingVerificationStartsAtMostOneNewPollingJob() = runTest {
+        val auth = FakeAuth(restored = null, statuses = mutableListOf(PhoneVerificationStatusResponse("PENDING"), PhoneVerificationStatusResponse("PENDING")))
+        val vm = startVerification(auth)
+        vm.onReturnedFromDialer(); runCurrent()
+        vm.changePhoneNumber()
+        vm.startPhoneVerification("+79991234567")
+        advanceUntilIdle()
+        vm.onReturnedFromDialer(); vm.onReturnedFromDialer(); runCurrent()
+        assertEquals(2, auth.statusCalls)
+        vm.stopPhoneVerificationPolling()
+    }
+
+    @Test fun rejectedPhoneStartHasClearRateLimitOrActiveVerificationMessage() = runTest {
+        val auth = FakeAuth(restored = null, startFailure = HttpException(Response.error<PhoneVerificationStartResponse>(401, "{}".toResponseBody("application/json".toMediaType()))))
+        val vm = viewModel(auth, FakeAccess())
+        advanceUntilIdle()
+        vm.startPhoneVerification("+79991234567")
+        advanceUntilIdle()
+        val error = vm.state.value as MainUiState.Error
+        assertEquals(AppError.PHONE_START_REJECTED, error.type)
+        assertTrue(error.message.contains("подтвержден"))
     }
 
     @Test fun pendingVerificationContinuesPolling() = runTest {
@@ -140,17 +221,19 @@ class MainViewModelTest {
         advanceUntilIdle(); vm.startPhoneVerification("+79991234567"); advanceUntilIdle()
         return vm
     }
-    private fun viewModel(auth: FakeAuth, access: FakeAccess) = MainViewModel(auth, access, FakeEngine(), 2_000)
+    private fun viewModel(auth: FakeAuth, access: FakeAccess) = MainViewModel(auth, access, FakeEngine(), 2_000) { Instant.parse("2026-09-01T00:00:00Z") }
     private fun session(accessStatus: String = "TRIAL") = Session("access", "refresh", 3600, "account", accessStatus, "2026-09-10T00:00:00Z")
 
     private class FakeAuth(
         private val restored: Session?,
         private val statuses: MutableList<PhoneVerificationStatusResponse> = mutableListOf(),
-        private val started: PhoneVerificationStartResponse = PhoneVerificationStartResponse("verification", "+79991234567", "+7 999 123-45-67", "2026-09-10T00:00:00Z")
+        private val started: PhoneVerificationStartResponse = PhoneVerificationStartResponse("verification", "+79991234567", "+7 999 123-45-67", "2026-09-10T00:00:00Z"),
+        private val startFailure: Throwable? = null
     ) : PhoneAuthSource {
         var starts = 0; var statusCalls = 0; var exchanges = 0; var savedSessions = 0; var deviceRegistrationCalls = 0
+        val startedPhones = mutableListOf<String>()
         override suspend fun restoreSession() = restored
-        override suspend fun startVerification(phone: String): PhoneVerificationStartResponse { starts++; return started }
+        override suspend fun startVerification(phone: String): PhoneVerificationStartResponse { starts++; startedPhones += phone; startFailure?.let { throw it }; return started }
         override suspend fun verificationStatus(verificationId: String): PhoneVerificationStatusResponse { statusCalls++; return statuses.removeFirstOrNull() ?: PhoneVerificationStatusResponse("PENDING") }
         override suspend fun exchange(verificationId: String, exchangeToken: String): Session { exchanges++; savedSessions++; return Session("access", "refresh", 3600, "account", "TRIAL", "2026-09-10T00:00:00Z") }
     }

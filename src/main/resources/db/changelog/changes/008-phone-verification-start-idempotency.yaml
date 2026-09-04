@@ -1,0 +1,14 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-phone-verification-start-idempotency
+      author: myvpn
+      changes:
+        - addColumn:
+            tableName: phone_verifications
+            columns:
+              - column:
+                  name: call_phone
+                  type: varchar(32)
+              - column:
+                  name: call_phone_pretty
+                  type: varchar(64)
