@@ -32,7 +32,7 @@ sealed interface MainUiState {
     data class Error(val type: AppError, val message: String, val retryable: Boolean) : MainUiState
     data object AwaitingPermission : MainUiState
     data object Connecting : MainUiState
-    data object Connected : MainUiState
+    data class Connected(val access: VpnAccessResponse, val session: Session) : MainUiState
     data object Disconnecting : MainUiState
 }
 
@@ -57,7 +57,7 @@ class MainViewModel(
         viewModelScope.launch {
             engine.state.collect { connection ->
                 when (connection) {
-                    VpnConnectionState.Connected -> _state.value = MainUiState.Connected
+                    VpnConnectionState.Connected -> ready?.let { current -> session?.let { _state.value = MainUiState.Connected(current, it) } }
                     VpnConnectionState.Connecting -> _state.value = MainUiState.Connecting
                     VpnConnectionState.Disconnecting -> _state.value = MainUiState.Disconnecting
                     VpnConnectionState.Disconnected -> ready?.let { current -> session?.let { _state.value = MainUiState.Ready(current, it) } }
@@ -132,6 +132,13 @@ class MainViewModel(
 
     /** Used by the host lifecycle and tests; onCleared invokes the same cancellation. */
     fun stopPhoneVerificationPolling() { pollingJob?.cancel(); pollingJob = null }
+
+    fun changePhoneNumber() {
+        stopPhoneVerificationPolling()
+        verification = null
+        exchangeStarted = false
+        _state.value = MainUiState.PhoneEntry()
+    }
 
     private fun exchange(verificationId: String, exchangeToken: String) {
         viewModelScope.launch {
