@@ -50,4 +50,17 @@ public class AccountVpnAccessTransactionService {
             return access.applyPolicy(generation, now);
         }).orElse(false);
     }
+
+    @Transactional
+    public VpnAccess reserveTrial(UUID accountId, String providerName, Instant now) {
+        return accesses.findByAccountId(accountId).orElseGet(() -> {
+            if (!accounts.existsById(accountId)) throw new IllegalArgumentException("Account not found");
+            return accesses.save(VpnAccess.builder().id(UUID.randomUUID())
+                    .account(entityManager.getReference(Account.class, accountId)).providerName(providerName)
+                    .externalAccessId(accountId.toString()).providerClientKey("acc_" + accountId)
+                    .status(VpnAccessStatus.PROVISIONING).issuedAt(now).createdAt(now).updatedAt(now)
+                    .desiredEntitlement(VpnEntitlement.TRIAL).policyStatus(VpnPolicyStatus.PENDING)
+                    .policyGeneration(1).nextPolicyAttemptAt(now).build());
+        });
+    }
 }

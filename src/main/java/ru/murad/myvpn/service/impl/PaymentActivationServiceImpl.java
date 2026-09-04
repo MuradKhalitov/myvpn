@@ -25,6 +25,7 @@ import ru.murad.myvpn.service.PaymentActivationWorkerResult;
 import ru.murad.myvpn.service.PreparedPaymentActivation;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -32,6 +33,7 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class PaymentActivationServiceImpl implements PaymentActivationService {
+    private static final Duration PROVIDER_TECHNICAL_LIFETIME = Duration.ofDays(3650);
     private final PaymentActivationTransactionService transactions;
     private final VpnProvider vpnProvider;
     private final PaymentProperties properties;
@@ -48,38 +50,33 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
             assertNoActiveTransaction();
             validatePreparedActivation(prepared);
             try {
-                PreparedPaymentActivation resolved = resolveProvisionTarget(prepared);
-                if (resolved == null) {
-                    counters.skipped++;
-                    continue;
-                }
-                ProviderCall providerCall = buildProviderCall(resolved);
+                ProviderCall providerCall = buildProviderCall(prepared);
                 ProvisionedVpnAccess result;
                 try {
                     result = invokeProviderOnly(providerCall);
                 } catch (PaymentProviderUncertainException | VpnProviderUncertainException
                          | ThreeXUiUncertainException | ThreeXUiRetryableException ex) {
-                    applyOutcome(counters, transactions.retry(resolved,
+                    applyOutcome(counters, transactions.retry(prepared,
                             PaymentActivationFailureCode.VPN_PROVIDER_TRANSIENT.name(), clock.instant()));
                     continue;
                 } catch (PaymentProviderPermanentException | VpnProviderPermanentException | ThreeXUiException ex) {
-                    applyOutcome(counters, transactions.manualReview(resolved,
+                    applyOutcome(counters, transactions.manualReview(prepared,
                             permanentFailureCode(ex), clock.instant()));
                     continue;
                 } catch (RuntimeException unexpectedProviderFailure) {
-                    applyOutcome(counters, transactions.retry(resolved,
+                    applyOutcome(counters, transactions.retry(prepared,
                             PaymentActivationFailureCode.ACTIVATION_PROVIDER_UNEXPECTED.name(), clock.instant()));
                     continue;
                 }
 
                 PaymentActivationTransactionService.PaymentActivationOutcome outcome;
                 try {
-                    outcome = transactions.complete(resolved, result, clock.instant());
+                    outcome = transactions.complete(prepared, result, clock.instant());
                 } catch (PaymentActivationResultMismatchException mismatch) {
-                    outcome = transactions.manualReview(resolved,
+                    outcome = transactions.manualReview(prepared,
                             PaymentActivationFailureCode.ACTIVATION_PROVIDER_RESULT_MISMATCH.name(), clock.instant());
                 } catch (PaymentOrderValidationException invalidResult) {
-                    outcome = transactions.manualReview(resolved,
+                    outcome = transactions.manualReview(prepared,
                             PaymentActivationFailureCode.VPN_PROVIDER_RESULT_INVALID.name(), clock.instant());
                 }
                 applyOutcome(counters, outcome);
@@ -91,19 +88,6 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
         }
         return new PaymentActivationWorkerResult(claimed.size(), exhausted, counters.succeeded, counters.retryScheduled,
                 counters.manualReview, counters.skipped, counters.infrastructureFailures);
-    }
-
-    private PreparedPaymentActivation resolveProvisionTarget(PreparedPaymentActivation prepared) {
-        if (prepared.action() != ru.murad.myvpn.service.PaymentActivationAction.PROVISION
-                || prepared.targetExpiresAt() != null) {
-            return prepared;
-        }
-        Instant now = clock.instant();
-        Instant target = vpnProvider.resolveProvisionTarget(
-                new VpnProvisionRequest(prepared.accountId(), 0L, null,
-                        prepared.stableExternalClientId()),
-                prepared.durationDays(), now);
-        return transactions.fixProvisionTarget(prepared, target, now).orElse(null);
     }
 
     private void validatePreparedActivation(PreparedPaymentActivation prepared) {
@@ -131,16 +115,11 @@ public class PaymentActivationServiceImpl implements PaymentActivationService {
         return switch (prepared.action()) {
             case PROVISION -> {
                 VpnProvisionRequest request = new VpnProvisionRequest(prepared.accountId(), 0L,
-                        prepared.targetExpiresAt(), prepared.stableExternalClientId());
+                        clock.instant().plus(PROVIDER_TECHNICAL_LIFETIME), prepared.stableExternalClientId());
                 yield () -> vpnProvider.provision(request);
             }
-            case ACTIVATE_EXISTING -> () -> new ProvisionedVpnAccess(prepared.vpnProviderName(),
+            case ACTIVATE_EXISTING, EXTEND -> () -> new ProvisionedVpnAccess(prepared.vpnProviderName(),
                     prepared.stableExternalClientId(), null, prepared.targetExpiresAt());
-            case EXTEND -> {
-                VpnExtensionRequest request = new VpnExtensionRequest(prepared.stableExternalClientId(),
-                        prepared.targetExpiresAt());
-                yield () -> vpnProvider.extend(request);
-            }
         };
     }
 

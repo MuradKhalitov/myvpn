@@ -35,3 +35,11 @@ auth:
     public-key-base64: ${AUTH_JWT_PUBLIC_KEY_BASE64:?AUTH_JWT_PUBLIC_KEY_BASE64 is required in production}
   refresh:
     pepper: ${AUTH_REFRESH_PEPPER:?AUTH_REFRESH_PEPPER is required in production}
+
+sms:
+  ru:
+    enabled: ${SMS_RU_ENABLED:false}
+    api-id: ${SMS_RU_API_ID:}
+    base-url: ${SMS_RU_BASE_URL:https://sms.ru}
+    connect-timeout: ${SMS_RU_CONNECT_TIMEOUT_MS:3000ms}
+    read-timeout: ${SMS_RU_READ_TIMEOUT_MS:5000ms}

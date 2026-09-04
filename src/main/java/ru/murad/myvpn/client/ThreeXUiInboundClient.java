@@ -145,6 +145,23 @@ public class ThreeXUiInboundClient {
         }
     }
 
+    public ThreeXUiClientRequest prepareEnableUpdateRequest(ThreeXUiInboundResponse inbound, String clientUuid, boolean enabled) {
+        try {
+            JsonNode settings = objectMapper.readTree(inbound.settings());
+            JsonNode clients = settings == null ? null : settings.get("clients");
+            if (clients == null || !clients.isArray()) throw new ThreeXUiNotFoundException("enable client");
+            ObjectNode target = null;
+            for (JsonNode client : clients) {
+                if (clientUuid.equals(client.path("id").asText())) { target = ((ObjectNode) client).deepCopy(); break; }
+            }
+            if (target == null) throw new ThreeXUiNotFoundException("enable client");
+            target.put("enable", enabled);
+            ObjectNode updateSettings = objectMapper.createObjectNode();
+            updateSettings.set("clients", objectMapper.createArrayNode().add(target));
+            return new ThreeXUiClientRequest(properties.inboundId(), objectMapper.writeValueAsString(updateSettings));
+        } catch (JsonProcessingException exception) { throw new ThreeXUiException("Invalid 3x-ui inbound settings"); }
+    }
+
     private ThreeXUiClientRequest prepareClientUpdateRequest(
             ThreeXUiInboundResponse inbound,
             String clientUuid,

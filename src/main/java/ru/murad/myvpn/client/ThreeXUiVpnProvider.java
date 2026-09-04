@@ -9,6 +9,8 @@ import ru.murad.myvpn.client.threexui.ThreeXUiInboundResponse;
 import ru.murad.myvpn.client.threexui.ThreeXUiInboundSettings;
 import ru.murad.myvpn.client.threexui.ThreeXUiVlessClient;
 import ru.murad.myvpn.config.ThreeXUiProperties;
+import ru.murad.myvpn.repository.AccountIdentityRepository;
+import ru.murad.myvpn.model.AccountIdentityType;
 import ru.murad.myvpn.exception.ThreeXUiException;
 import ru.murad.myvpn.exception.ThreeXUiNotFoundException;
 import ru.murad.myvpn.exception.ThreeXUiRetryableException;
@@ -67,17 +69,26 @@ public class ThreeXUiVpnProvider implements VpnProvider {
     private final VpnConfigurationFactory configurationFactory;
     private final ThreeXUiConfigurationMapper configurationMapper;
     private final ThreeXUiProperties properties;
+    private final AccountIdentityRepository identities;
 
     public ThreeXUiVpnProvider(
             ThreeXUiInboundClient inboundClient,
             VpnConfigurationFactory configurationFactory,
             ThreeXUiConfigurationMapper configurationMapper,
-            ThreeXUiProperties properties
+            ThreeXUiProperties properties,
+            AccountIdentityRepository identities
     ) {
         this.inboundClient = inboundClient;
         this.configurationFactory = configurationFactory;
         this.configurationMapper = configurationMapper;
         this.properties = properties;
+        this.identities = identities;
+    }
+
+    /** Compatibility constructor for focused provider tests without persistence. */
+    public ThreeXUiVpnProvider(ThreeXUiInboundClient inboundClient, VpnConfigurationFactory configurationFactory,
+            ThreeXUiConfigurationMapper configurationMapper, ThreeXUiProperties properties) {
+        this(inboundClient, configurationFactory, configurationMapper, properties, null);
     }
 
     @Override
@@ -87,9 +98,7 @@ public class ThreeXUiVpnProvider implements VpnProvider {
         String clientUuid = request.stableExternalAccessId() == null
                 ? request.subscriptionId().toString() : request.stableExternalAccessId();
         long expectedExpiry = request.expiresAt().toEpochMilli();
-        ThreeXUiVlessClient client = ThreeXUiVlessClient.create(
-                clientUuid, request.providerClientKey() == null ? EMAIL_PREFIX + clientUuid
-                        : request.providerClientKey(), expectedExpiry);
+        ThreeXUiVlessClient client = ThreeXUiVlessClient.create(clientUuid, displayName(request, clientUuid), expectedExpiry);
         boolean reconciliationStarted = false;
         for (int attempt = 1; attempt <= properties.maxMutationAttempts(); attempt++) {
             boolean mutationAttempted = false;
@@ -176,6 +185,15 @@ public class ThreeXUiVpnProvider implements VpnProvider {
             throw new ThreeXUiUncertainException();
         }
         throw new ThreeXUiException("3x-ui client creation was not confirmed");
+    }
+
+    private String displayName(VpnProvisionRequest request, String clientUuid) {
+        if (identities != null && request.subscriptionId() != null) {
+            return identities.findByAccountIdAndType(request.subscriptionId(), AccountIdentityType.PHONE)
+                    .map(identity -> identity.getNormalizedSubject()).filter(value -> value != null && !value.isBlank())
+                    .orElseGet(() -> request.providerClientKey() == null ? EMAIL_PREFIX + clientUuid : request.providerClientKey());
+        }
+        return request.providerClientKey() == null ? EMAIL_PREFIX + clientUuid : request.providerClientKey();
     }
 
     @Override
@@ -268,6 +286,21 @@ public class ThreeXUiVpnProvider implements VpnProvider {
             }
         }
         throw new ThreeXUiUncertainException();
+    }
+
+    @Override
+    public void setAccessEnabled(String externalAccessId, boolean enabled) {
+        ThreeXUiRequestBudget budget = new ThreeXUiRequestBudget(properties.maxRequestsPerOperation());
+        try {
+            ThreeXUiInboundResponse before = inboundClient.getInbound(budget);
+            ThreeXUiVlessClient client = findClient(before, externalAccessId).orElseThrow(() -> new ThreeXUiNotFoundException("enable client"));
+            if (java.util.Objects.equals(client.enable(), enabled)) return;
+            budget.reserveReconciliation();
+            inboundClient.updateClient(externalAccessId, inboundClient.prepareEnableUpdateRequest(before, externalAccessId, enabled), budget);
+            ThreeXUiInboundResponse after = inboundClient.getInboundForReconciliation(budget);
+            if (!findClient(after, externalAccessId).map(value -> java.util.Objects.equals(value.enable(), enabled)).orElse(false)
+                    || !inboundClient.otherClientsUnchanged(before, after, externalAccessId)) throw new ThreeXUiUncertainException();
+        } catch (ThreeXUiRetryableException exception) { throw new ThreeXUiUncertainException(); }
     }
 
     private ProvisionedVpnAccess extensionResult(ThreeXUiVlessClient client) {

@@ -15,6 +15,7 @@ public interface AccountIdentityRepository extends JpaRepository<AccountIdentity
             AccountIdentityType type,
             String normalizedSubject
     );
+    Optional<AccountIdentity> findByAccountIdAndType(UUID accountId, AccountIdentityType type);
 
     boolean existsByTypeAndNormalizedSubject(
             AccountIdentityType type,

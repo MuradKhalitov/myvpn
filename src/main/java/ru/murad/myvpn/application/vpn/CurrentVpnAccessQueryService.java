@@ -8,6 +8,7 @@ import ru.murad.myvpn.model.VpnAccess;
 import ru.murad.myvpn.model.VpnAccessStatus;
 import ru.murad.myvpn.model.VpnEntitlement;
 import ru.murad.myvpn.model.SubscriptionStatus;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.SubscriptionRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
 
@@ -21,6 +22,7 @@ public class CurrentVpnAccessQueryService implements CurrentVpnAccessQuery {
 
     private final SubscriptionRepository subscriptionRepository;
     private final VpnAccessRepository vpnAccessRepository;
+    private final AccountRepository accountRepository;
     private final VpnTrafficProperties trafficProperties;
     private final Clock clock;
 
@@ -33,10 +35,16 @@ public class CurrentVpnAccessQueryService implements CurrentVpnAccessQuery {
                 .findFirstByAccountIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
                         accountId, SubscriptionStatus.ACTIVE, now)
                 .orElse(null);
-        VpnEntitlement entitlement = premium == null ? VpnEntitlement.FREE : VpnEntitlement.PREMIUM;
+        boolean trial = accountRepository.findById(accountId)
+                .map(account -> account.hasActiveTrialAt(now))
+                .orElse(false);
+        VpnEntitlement entitlement = premium != null ? VpnEntitlement.PREMIUM
+                : trial ? VpnEntitlement.TRIAL
+                : access != null && access.getDesiredEntitlement() == VpnEntitlement.EXPIRED
+                    ? VpnEntitlement.EXPIRED : VpnEntitlement.FREE;
         if (access == null) {
             return new VpnAccessResponse(VpnAccessApiStatus.PROVISIONING, entitlement, null,
-                    entitlement == VpnEntitlement.PREMIUM ? null : new VpnQuotaResponse(
+                    entitlement == VpnEntitlement.PREMIUM || entitlement == VpnEntitlement.TRIAL ? null : new VpnQuotaResponse(
                             trafficProperties.trafficLimitBytes(), null, null),
                     premium == null ? null : premium.getExpiresAt());
         }
@@ -46,7 +54,7 @@ public class CurrentVpnAccessQueryService implements CurrentVpnAccessQuery {
                 : access.getStatus() == VpnAccessStatus.REVOKED
                     || access.getPolicyStatus() == ru.murad.myvpn.model.VpnPolicyStatus.RETRY_REQUIRED
                     ? VpnAccessApiStatus.RETRY_REQUIRED : VpnAccessApiStatus.PROVISIONING;
-        VpnQuotaResponse quota = entitlement == VpnEntitlement.PREMIUM ? null : new VpnQuotaResponse(
+        VpnQuotaResponse quota = entitlement == VpnEntitlement.PREMIUM || entitlement == VpnEntitlement.TRIAL ? null : new VpnQuotaResponse(
                 trafficProperties.trafficLimitBytes(), access.getQuotaPeriodStartedAt(), access.getQuotaPeriodEndsAt());
         return new VpnAccessResponse(status, entitlement,
                 status == VpnAccessApiStatus.READY ? access.getConfigurationData() : null,

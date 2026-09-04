@@ -11,6 +11,9 @@ import ru.murad.myvpn.client.threexui.ThreeXUiInboundResponse;
 import ru.murad.myvpn.client.threexui.ThreeXUiInboundSettings;
 import ru.murad.myvpn.client.threexui.ThreeXUiVlessClient;
 import ru.murad.myvpn.config.ThreeXUiProperties;
+import ru.murad.myvpn.repository.AccountIdentityRepository;
+import ru.murad.myvpn.model.AccountIdentity;
+import ru.murad.myvpn.model.AccountIdentityType;
 import ru.murad.myvpn.exception.ThreeXUiException;
 import ru.murad.myvpn.exception.ThreeXUiRetryableException;
 import ru.murad.myvpn.exception.ThreeXUiUncertainException;
@@ -40,6 +43,7 @@ class ThreeXUiVpnProviderTest {
     @Mock private ThreeXUiInboundClient inboundClient;
     @Mock private VpnConfigurationFactory configurationFactory;
     @Mock private ThreeXUiConfigurationMapper configurationMapper;
+    @Mock private AccountIdentityRepository identities;
 
     private ThreeXUiVpnProvider provider;
 
@@ -60,7 +64,7 @@ class ThreeXUiVpnProviderTest {
                 Duration.ZERO,
                 Duration.ZERO);
         provider = new ThreeXUiVpnProvider(
-                inboundClient, configurationFactory, configurationMapper, properties);
+                inboundClient, configurationFactory, configurationMapper, properties, identities);
     }
 
     @Test
@@ -94,13 +98,57 @@ class ThreeXUiVpnProviderTest {
         when(inboundClient.serializeSettings(any())).thenReturn("serialized-settings");
         stubConfiguration(after);
 
-        provider.provision(provisionRequest());
+        VpnProvisionRequest request = provisionRequestWithKey();
+        provider.provision(request);
 
         ArgumentCaptor<ThreeXUiClientRequest> captor =
                 ArgumentCaptor.forClass(ThreeXUiClientRequest.class);
         verify(inboundClient).addClient(captor.capture(), any());
         assertThat(captor.getValue().id()).isEqualTo(42);
         assertThat(captor.getValue().settings()).isEqualTo("serialized-settings");
+    }
+
+    @Test
+    void phoneIdentityIsUsedOnlyAsNewClientEmailDisplayLabel() {
+        ThreeXUiInboundResponse before = inbound("before");
+        ThreeXUiInboundResponse after = inbound("after");
+        ThreeXUiVlessClient client = client(EXPIRY.toEpochMilli());
+        when(inboundClient.getInbound(any())).thenReturn(before);
+        when(inboundClient.getInboundForReconciliation(any())).thenReturn(after);
+        when(inboundClient.parseSettings(before)).thenReturn(new ThreeXUiInboundSettings(List.of()));
+        when(inboundClient.parseSettings(after)).thenReturn(new ThreeXUiInboundSettings(List.of(client)));
+        when(inboundClient.serializeSettings(any())).thenReturn("serialized-settings");
+        AccountIdentity phone = AccountIdentity.builder().type(AccountIdentityType.PHONE)
+                .normalizedSubject("+79991234567").build();
+        when(identities.findByAccountIdAndType(SUBSCRIPTION_ID, AccountIdentityType.PHONE)).thenReturn(java.util.Optional.of(phone));
+        stubConfiguration(after);
+
+        VpnProvisionRequest request = provisionRequestWithKey();
+        provider.provision(request);
+
+        ArgumentCaptor<ThreeXUiInboundSettings> settings = ArgumentCaptor.forClass(ThreeXUiInboundSettings.class);
+        verify(inboundClient).serializeSettings(settings.capture());
+        ThreeXUiVlessClient payload = settings.getValue().clients().get(0);
+        assertThat(payload.email()).isEqualTo("+79991234567");
+        assertThat(payload.id()).isEqualTo(SUBSCRIPTION_ID.toString());
+        assertThat(request.providerClientKey()).isEqualTo("acc_key");
+    }
+
+    @Test
+    void legacyAccountKeepsProviderClientKeyAsEmailDisplayLabel() {
+        ThreeXUiInboundResponse before = inbound("before");
+        ThreeXUiInboundResponse after = inbound("after");
+        when(inboundClient.getInbound(any())).thenReturn(before);
+        when(inboundClient.getInboundForReconciliation(any())).thenReturn(after);
+        when(inboundClient.parseSettings(before)).thenReturn(new ThreeXUiInboundSettings(List.of()));
+        when(inboundClient.parseSettings(after)).thenReturn(new ThreeXUiInboundSettings(List.of(client(EXPIRY.toEpochMilli()))));
+        when(inboundClient.serializeSettings(any())).thenReturn("serialized-settings"); stubConfiguration(after);
+
+        provider.provision(provisionRequestWithKey());
+
+        ArgumentCaptor<ThreeXUiInboundSettings> settings = ArgumentCaptor.forClass(ThreeXUiInboundSettings.class);
+        verify(inboundClient).serializeSettings(settings.capture());
+        assertThat(settings.getValue().clients().get(0).email()).isEqualTo("acc_key");
     }
 
     @Test
@@ -461,6 +509,10 @@ class ThreeXUiVpnProviderTest {
     private VpnProvisionRequest provisionRequest() {
         return new VpnProvisionRequest(SUBSCRIPTION_ID, 123L, EXPIRY,
                 SUBSCRIPTION_ID.toString());
+    }
+    private VpnProvisionRequest provisionRequestWithKey() {
+        return new VpnProvisionRequest(SUBSCRIPTION_ID, 123L, EXPIRY,
+                SUBSCRIPTION_ID.toString(), "acc_key");
     }
 
     private ThreeXUiInboundResponse inbound() {

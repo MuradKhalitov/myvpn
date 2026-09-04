@@ -87,8 +87,9 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                     : access != null && access.getStatus() == VpnAccessStatus.ACTIVE
                             ? PaymentActivationAction.ACTIVATE_EXISTING : PaymentActivationAction.PROVISION;
             Instant target = order.getActivationTargetExpiresAt();
-            if (target == null && (action != PaymentActivationAction.PROVISION || !"3X_UI".equals(vpnProvider.providerName()))) {
-                Instant base = active == null || active.getExpiresAt().isBefore(now) ? now : active.getExpiresAt();
+            if (target == null) {
+                Instant base = active != null && !active.getExpiresAt().isBefore(now) ? active.getExpiresAt()
+                        : order.getAccount().hasActiveTrialAt(now) ? order.getAccount().getTrialExpiresAt() : now;
                 target = plus(base, java.time.Duration.ofDays(order.getDurationDaysSnapshot()), "Activation target");
                 order.fixActivationTargetExpiresAt(token, generation, target, now);
             }
@@ -241,9 +242,14 @@ public class PaymentActivationTransactionServiceImpl implements PaymentActivatio
                 || r.targetExpiresAt() == null) throw new PaymentOrderValidationException("Invalid VPN provider result");
         if (!Objects.equals(r.externalAccessId(), p.stableExternalClientId())) mismatch("externalAccessId");
         if (!Objects.equals(r.providerName(), p.vpnProviderName())) mismatch("providerName");
-        Duration expiryDifference = Duration.between(p.targetExpiresAt(), r.targetExpiresAt()).abs();
-        if (expiryDifference.compareTo(PROVIDER_EXPIRY_TOLERANCE) > 0) {
-            mismatchExpiry(p.targetExpiresAt(), r.targetExpiresAt(), expiryDifference);
+        // 3x-ui expiryTime is a technical lifetime for the stable provider identity.
+        // Business access expiry is the target stored on Subscription, so provisioning
+        // must not bind it to the provider's technical expiry.
+        if (p.action() != PaymentActivationAction.PROVISION) {
+            Duration expiryDifference = Duration.between(p.targetExpiresAt(), r.targetExpiresAt()).abs();
+            if (expiryDifference.compareTo(PROVIDER_EXPIRY_TOLERANCE) > 0) {
+                mismatchExpiry(p.targetExpiresAt(), r.targetExpiresAt(), expiryDifference);
+            }
         }
         if (p.action() == PaymentActivationAction.PROVISION && (r.configurationData() == null || r.configurationData().isBlank())) throw new PaymentOrderValidationException("Incomplete VPN provision result");
     }

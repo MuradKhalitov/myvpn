@@ -37,6 +37,7 @@ import static org.mockito.Mockito.*;
 class PaymentActivationServiceTest {
     private static final Instant NOW = Instant.parse("2026-07-25T10:00:00Z");
     private static final Instant TARGET = NOW.plus(Duration.ofDays(30));
+    private static final Instant PROVIDER_TECHNICAL_EXPIRY = NOW.plus(Duration.ofDays(3650));
     private final PaymentActivationTransactionService transactions = mock(PaymentActivationTransactionService.class);
     private final VpnProvider provider = mock(VpnProvider.class);
     private final PaymentActivationService service = new ru.murad.myvpn.service.impl.PaymentActivationServiceImpl(
@@ -54,33 +55,24 @@ class PaymentActivationServiceTest {
         InOrder inOrder = inOrder(transactions, provider);
         inOrder.verify(transactions).markExhaustedActivations(NOW, 20);
         inOrder.verify(transactions).claimActivations(NOW, 20);
-        inOrder.verify(provider).provision(new VpnProvisionRequest(prepared.userId(), 0L, TARGET, prepared.stableExternalClientId()));
+        inOrder.verify(provider).provision(new VpnProvisionRequest(prepared.userId(), 0L, PROVIDER_TECHNICAL_EXPIRY, prepared.stableExternalClientId()));
         inOrder.verify(transactions).complete(prepared, result, NOW);
     }
 
     @Test
-    void providerResolvedProvisionTargetIsFixedBeforeMutation() {
-        PreparedPaymentActivation unresolved = prepared(PaymentActivationAction.PROVISION)
-                .withTargetExpiresAt(null);
-        PreparedPaymentActivation fixed = unresolved.withTargetExpiresAt(TARGET);
-        ProvisionedVpnAccess result = result(fixed, "config");
-        when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(unresolved));
-        when(provider.resolveProvisionTarget(
-                new VpnProvisionRequest(unresolved.userId(), 0L, null,
-                        unresolved.stableExternalClientId()), 30, NOW)).thenReturn(TARGET);
-        when(transactions.fixProvisionTarget(unresolved, TARGET, NOW))
-                .thenReturn(Optional.of(fixed));
-        when(provider.provision(new VpnProvisionRequest(fixed.userId(), 0L, TARGET,
-                fixed.stableExternalClientId()))).thenReturn(result);
-        when(transactions.complete(fixed, result, NOW))
+    void provisionUsesTechnicalExpiryWhilePreparedTargetRemainsBusinessExpiry() {
+        PreparedPaymentActivation prepared = prepared(PaymentActivationAction.PROVISION);
+        ProvisionedVpnAccess result = result(prepared, "config");
+        when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(prepared));
+        when(provider.provision(new VpnProvisionRequest(prepared.userId(), 0L, PROVIDER_TECHNICAL_EXPIRY,
+                prepared.stableExternalClientId()))).thenReturn(result);
+        when(transactions.complete(prepared, result, NOW))
                 .thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
 
         assertThat(service.processPendingActivations(20).succeeded()).isEqualTo(1);
-        InOrder order = inOrder(transactions, provider);
-        order.verify(provider).resolveProvisionTarget(any(), eq(30), eq(NOW));
-        order.verify(transactions).fixProvisionTarget(unresolved, TARGET, NOW);
-        order.verify(provider).provision(new VpnProvisionRequest(fixed.userId(), 0L, TARGET,
-                fixed.stableExternalClientId()));
+        verify(provider).provision(new VpnProvisionRequest(prepared.userId(), 0L, PROVIDER_TECHNICAL_EXPIRY,
+                prepared.stableExternalClientId()));
+        verify(provider, never()).resolveProvisionTarget(any(), anyInt(), any());
     }
 
     @Test
@@ -88,13 +80,11 @@ class PaymentActivationServiceTest {
         PreparedPaymentActivation prepared = prepared(PaymentActivationAction.EXTEND);
         ProvisionedVpnAccess result = result(prepared, null);
         when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(prepared));
-        when(provider.extend(new VpnExtensionRequest(prepared.stableExternalClientId(), TARGET))).thenReturn(result);
         when(transactions.complete(prepared, result, NOW)).thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
 
         assertThat(service.processPendingActivations(20).succeeded()).isEqualTo(1);
-        InOrder inOrder = inOrder(transactions, provider);
-        inOrder.verify(provider).extend(new VpnExtensionRequest(prepared.stableExternalClientId(), TARGET));
-        inOrder.verify(transactions).complete(prepared, result, NOW);
+        verifyNoInteractions(provider);
+        verify(transactions).complete(prepared, result, NOW);
         verify(provider, never()).provision(any());
     }
 
@@ -187,14 +177,13 @@ class PaymentActivationServiceTest {
     }
 
     @Test
-    void extendResultWithDifferentIdentityIsManualReview() {
+    void extendDoesNotMutateProviderTechnicalExpiry() {
         PreparedPaymentActivation p = prepared(PaymentActivationAction.EXTEND);
-        ProvisionedVpnAccess malformed = new ProvisionedVpnAccess("FAKE", "different-client", null, TARGET);
         when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(p));
-        when(provider.extend(any())).thenReturn(malformed);
-        when(transactions.complete(p, malformed, NOW)).thenThrow(new PaymentOrderValidationException("identity"));
-        when(transactions.manualReview(p, "VPN_PROVIDER_RESULT_INVALID", NOW)).thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.MANUAL_REVIEW_REQUIRED));
-        assertThat(service.processPendingActivations(20).manualReview()).isEqualTo(1);
+        ProvisionedVpnAccess expected = result(p, null);
+        when(transactions.complete(p, expected, NOW)).thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
+        assertThat(service.processPendingActivations(20).succeeded()).isEqualTo(1);
+        verifyNoInteractions(provider);
     }
 
     @Test
@@ -309,10 +298,10 @@ class PaymentActivationServiceTest {
         PreparedPaymentActivation p = prepared(PaymentActivationAction.PROVISION);
         when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(p));
         ProvisionedVpnAccess result = result(p, "config");
-        when(provider.provision(new VpnProvisionRequest(p.userId(), 0L, TARGET, p.stableExternalClientId()))).thenReturn(result);
+        when(provider.provision(new VpnProvisionRequest(p.userId(), 0L, PROVIDER_TECHNICAL_EXPIRY, p.stableExternalClientId()))).thenReturn(result);
         when(transactions.complete(p, result, NOW)).thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
         service.processPendingActivations(20);
-        verify(provider).provision(new VpnProvisionRequest(p.userId(), 0L, TARGET, p.stableExternalClientId()));
+        verify(provider).provision(new VpnProvisionRequest(p.userId(), 0L, PROVIDER_TECHNICAL_EXPIRY, p.stableExternalClientId()));
     }
 
     @Test
@@ -323,10 +312,9 @@ class PaymentActivationServiceTest {
     }
 
     @Test
-    void extendCallsOnlyExtend() {
+    void extendDoesNotCallProvider() {
         runSuccess(PaymentActivationAction.EXTEND);
-        verify(provider).extend(any());
-        verify(provider, never()).provision(any());
+        verifyNoInteractions(provider);
     }
 
     @Test
@@ -464,18 +452,17 @@ class PaymentActivationServiceTest {
     }
 
     @Test
-    void unexpectedExtendRuntimeSchedulesSafeRetry() {
+    void extendDoesNotDependOnProviderRuntime() {
         PreparedPaymentActivation p = prepared(PaymentActivationAction.EXTEND);
         when(transactions.claimActivations(NOW, 20)).thenReturn(List.of(p));
-        when(provider.extend(any())).thenThrow(new IllegalStateException("provider runtime"));
-        when(transactions.retry(p, "ACTIVATION_PROVIDER_UNEXPECTED", NOW))
-                .thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.RETRY_SCHEDULED));
+        ProvisionedVpnAccess expected = result(p, null);
+        when(transactions.complete(p, expected, NOW)).thenReturn(outcome(PaymentActivationTransactionService.PaymentActivationOutcome.SUCCEEDED));
 
         PaymentActivationWorkerResult result = service.processPendingActivations(20);
 
-        assertThat(result.retryScheduled()).isEqualTo(1);
+        assertThat(result.succeeded()).isEqualTo(1);
         assertThat(result.skipped()).isZero();
-        verify(transactions).retry(p, "ACTIVATION_PROVIDER_UNEXPECTED", NOW);
+        verifyNoInteractions(provider);
     }
 
     @Test

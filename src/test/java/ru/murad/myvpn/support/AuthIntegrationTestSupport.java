@@ -17,6 +17,7 @@ import ru.murad.myvpn.repository.AuthSessionRepository;
 import ru.murad.myvpn.repository.EmailOtpChallengeRepository;
 import ru.murad.myvpn.repository.DeviceCredentialRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
+import ru.murad.myvpn.repository.PhoneVerificationRepository;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.util.Base64;
@@ -49,9 +50,10 @@ public abstract class AuthIntegrationTestSupport {
     @Autowired protected AccountIdentityRepository identityRepository;
     @Autowired protected AccountRepository accountRepository;
     @Autowired protected VpnAccessRepository vpnAccessRepository;
+    @Autowired protected PhoneVerificationRepository phoneVerificationRepository;
     @Autowired protected JwtDecoder jwtDecoder;
     @BeforeEach void cleanAuthData() {
-        vpnAccessRepository.deleteAll();
+        phoneVerificationRepository.deleteAll(); vpnAccessRepository.deleteAll();
         sessionRepository.deleteAll(); challengeRepository.deleteAll(); deviceCredentialRepository.deleteAll();
         identityRepository.deleteAll(); accountRepository.deleteAll();
     }

@@ -16,7 +16,9 @@ class SecurityConfigurationIntegrationTest extends AuthIntegrationTestSupport {
     @Test
     void protectedApiRejectsMissingAndInvalidJwt() {
         webTestClient.get().uri("/api/v1/protected-resource")
-                .exchange().expectStatus().isUnauthorized();
+                .exchange().expectStatus().isUnauthorized()
+                .expectHeader().value(HttpHeaders.WWW_AUTHENTICATE, value ->
+                        org.assertj.core.api.Assertions.assertThat(value).startsWith("Bearer").doesNotContain("Basic"));
         webTestClient.get().uri("/api/v1/vpn/access")
                 .exchange().expectStatus().isUnauthorized();
         webTestClient.get().uri("/api/v1/vpn/access")

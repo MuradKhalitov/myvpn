@@ -28,9 +28,10 @@ class SubscriptionLifecycleServiceImplTest {
     @Test
     void expiredPremiumDowngradesCanonicalAccessToFreeWithoutRevokingProviderIdentity() {
         SubscriptionRepository subscriptions = mock(SubscriptionRepository.class);
+        ru.murad.myvpn.repository.AccountRepository accounts = mock(ru.murad.myvpn.repository.AccountRepository.class);
         VpnAccessRepository accesses = mock(VpnAccessRepository.class);
         VpnTrafficPolicyTransactionService policies = mock(VpnTrafficPolicyTransactionService.class);
-        SubscriptionLifecycleServiceImpl service = new SubscriptionLifecycleServiceImpl(subscriptions, accesses,
+        SubscriptionLifecycleServiceImpl service = new SubscriptionLifecycleServiceImpl(subscriptions, accounts, accesses,
                 policies, new VpnTrafficProperties(100L, 30, 0), Clock.fixed(NOW, ZoneOffset.UTC));
         UUID accountId = UUID.randomUUID();
         Account account = Account.builder().id(accountId).createdAt(NOW).updatedAt(NOW).build();
@@ -49,7 +50,7 @@ class SubscriptionLifecycleServiceImplTest {
         assertThat(service.revokeExpiredSubscriptions()).isEqualTo(1);
         assertThat(service.revokeExpiredSubscriptions()).isZero();
 
-        verify(policies).request(accountId, VpnEntitlement.FREE, NOW, NOW.plusSeconds(30L * 24 * 60 * 60), NOW);
+        verify(policies).request(accountId, VpnEntitlement.EXPIRED, null, null, NOW);
         verify(subscriptions).save(subscription);
         assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.EXPIRED);
         assertThat(access.getStatus()).isEqualTo(VpnAccessStatus.ACTIVE);

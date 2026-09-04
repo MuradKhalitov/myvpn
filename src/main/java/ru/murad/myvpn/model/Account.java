@@ -40,4 +40,25 @@ public class Account {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    @Column(name = "trial_started_at")
+    private Instant trialStartedAt;
+
+    @Column(name = "trial_expires_at")
+    private Instant trialExpiresAt;
+
+    @Column(name = "trial_granted_at")
+    private Instant trialGrantedAt;
+
+    public boolean hasActiveTrialAt(Instant now) {
+        return trialExpiresAt != null && trialExpiresAt.isAfter(now);
+    }
+
+    public void grantTrial(Instant now, Instant expiresAt) {
+        if (trialGrantedAt != null) return;
+        this.trialStartedAt = now;
+        this.trialExpiresAt = expiresAt;
+        this.trialGrantedAt = now;
+        this.updatedAt = now;
+    }
 }

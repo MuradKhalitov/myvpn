@@ -21,5 +21,7 @@ public interface VpnProvider {
         applyTrafficPolicy(externalAccessId, policy);
     }
 
+    default void setAccessEnabled(String externalAccessId, boolean enabled) { }
+
     void revoke(String externalAccessId);
 }

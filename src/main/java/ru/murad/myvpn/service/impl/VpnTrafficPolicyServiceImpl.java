@@ -44,6 +44,7 @@ public class VpnTrafficPolicyServiceImpl implements VpnTrafficPolicyService {
                                 candidate.providerClientKey()))
                         : null;
                 provider.applyTrafficPolicy(candidate.externalAccessId(), candidate.providerClientKey(), policy(candidate.entitlement()));
+                provider.setAccessEnabled(candidate.externalAccessId(), candidate.entitlement() != VpnEntitlement.EXPIRED);
                 boolean completed = candidate.requiresProvisioning()
                         ? freeAccessTransactions.completeFree(candidate.accessId(), candidate.generation(),
                                 provisioned.providerName(), provisioned.configurationData(), now)
@@ -71,7 +72,7 @@ public class VpnTrafficPolicyServiceImpl implements VpnTrafficPolicyService {
     }
 
     private VpnTrafficPolicy policy(VpnEntitlement entitlement) {
-        return entitlement == VpnEntitlement.PREMIUM
+        return entitlement == VpnEntitlement.PREMIUM || entitlement == VpnEntitlement.TRIAL
                 ? VpnTrafficPolicy.unlimited(properties.premiumUnlimitedTotalGb())
                 : VpnTrafficPolicy.limited(properties.trafficLimitBytes());
     }

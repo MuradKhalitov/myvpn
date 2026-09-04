@@ -26,7 +26,10 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/otp/request",
                                 "/api/v1/auth/otp/verify",
                                 "/api/v1/auth/refresh",
-                                "/api/v1/device/register").permitAll()
+                                "/api/v1/device/register",
+                                "/api/v1/auth/phone/start",
+                                "/api/v1/auth/phone/exchange").permitAll()
+                        .pathMatchers(HttpMethod.GET, "/api/v1/auth/phone/*/status").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer.jwt(jwt -> { }))
                 .build();

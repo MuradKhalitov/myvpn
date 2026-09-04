@@ -1,0 +1,19 @@
+databaseChangeLog:
+  - changeSet:
+      id: 007-phone-verification-rate-limit
+      author: myvpn
+      changes:
+        - addColumn:
+            tableName: phone_verifications
+            columns:
+              - column:
+                  name: request_ip
+                  type: varchar(64)
+        - createIndex:
+            tableName: phone_verifications
+            indexName: idx_phone_verifications_ip_created
+            columns:
+              - column:
+                  name: request_ip
+              - column:
+                  name: created_at

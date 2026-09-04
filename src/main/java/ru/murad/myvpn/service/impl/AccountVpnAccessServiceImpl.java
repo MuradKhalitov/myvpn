@@ -46,4 +46,9 @@ public class AccountVpnAccessServiceImpl implements AccountVpnAccessService {
         }
         return access.getId();
     }
+
+    @Override
+    public UUID ensureTrialVpnAccess(UUID accountId) {
+        return transactions.reserveTrial(accountId, provider.providerName(), clock.instant()).getId();
+    }
 }

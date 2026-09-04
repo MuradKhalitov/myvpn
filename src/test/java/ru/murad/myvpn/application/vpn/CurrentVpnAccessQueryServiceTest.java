@@ -8,6 +8,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import ru.murad.myvpn.config.VpnTrafficProperties;
 import ru.murad.myvpn.model.*;
 import ru.murad.myvpn.repository.SubscriptionRepository;
+import ru.murad.myvpn.repository.AccountRepository;
 import ru.murad.myvpn.repository.VpnAccessRepository;
 
 import java.time.Clock;
@@ -24,6 +25,7 @@ class CurrentVpnAccessQueryServiceTest {
     private static final Instant NOW = Instant.parse("2026-09-02T00:00:00Z");
     @Mock SubscriptionRepository subscriptions;
     @Mock VpnAccessRepository accesses;
+    @Mock AccountRepository accounts;
 
     @Test
     void missingAccessIsProvisioningWithoutProviderCall() {
@@ -31,6 +33,7 @@ class CurrentVpnAccessQueryServiceTest {
         when(accesses.findByAccountId(accountId)).thenReturn(Optional.empty());
         when(subscriptions.findFirstByAccountIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
+        when(accounts.findById(accountId)).thenReturn(Optional.empty());
 
         VpnAccessResponse response = service().getCurrentAccess(accountId);
 
@@ -52,6 +55,7 @@ class CurrentVpnAccessQueryServiceTest {
         when(accesses.findByAccountId(accountId)).thenReturn(Optional.of(access));
         when(subscriptions.findFirstByAccountIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(any(), any(), any()))
                 .thenReturn(Optional.empty());
+        when(accounts.findById(accountId)).thenReturn(Optional.of(account));
 
         VpnAccessResponse response = service().getCurrentAccess(accountId);
 
@@ -73,6 +77,7 @@ class CurrentVpnAccessQueryServiceTest {
         when(accesses.findByAccountId(accountId)).thenReturn(Optional.of(access));
         when(subscriptions.findFirstByAccountIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(accountId, SubscriptionStatus.ACTIVE, NOW))
                 .thenReturn(Optional.of(subscription));
+        when(accounts.findById(accountId)).thenReturn(Optional.of(account));
 
         VpnAccessResponse response = service().getCurrentAccess(accountId);
 
@@ -83,7 +88,7 @@ class CurrentVpnAccessQueryServiceTest {
     }
 
     private CurrentVpnAccessQueryService service() {
-        return new CurrentVpnAccessQueryService(subscriptions, accesses,
+        return new CurrentVpnAccessQueryService(subscriptions, accesses, accounts,
                 new VpnTrafficProperties(5_368_709_120L, 30, 0), Clock.fixed(NOW, ZoneOffset.UTC));
     }
 }
