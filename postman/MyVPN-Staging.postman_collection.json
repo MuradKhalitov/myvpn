@@ -1,0 +1,198 @@
+{
+  "info": {
+    "_postman_id": "e06cb817-9441-4e88-b4d9-33e3678cedaf",
+    "name": "MyVPN Staging",
+    "description": "Manual staging smoke for MyVPN. Select the MyVPN Staging environment, then run requests in numeric order. Runtime IDs and tokens are stored only in the selected Postman environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET Health",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/actuator/health", "description": "Checks that the staging application is healthy. No authentication is required." },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var body = pm.response.json();",
+            "pm.test('status is UP', function () { pm.expect(body.status).to.eql('UP'); });"
+          ] } }]
+        }
+      ]
+    },
+    {
+      "name": "Phone Auth",
+      "item": [
+        {
+          "name": "01 Start Phone Verification",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"phone\": \"{{phone}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/v1/auth/phone/start",
+            "description": "Starts SMS.RU call verification. No Bearer token is required. Use the returned callPhone for the verification call; only verificationId is retained. If a pending verification already exists for this phone, wait for it to expire before starting another one."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var body = pm.response.json();",
+            "pm.test('verificationId exists', function () { pm.expect(body.verificationId).to.be.a('string').and.not.empty; });",
+            "pm.test('callPhone exists', function () { pm.expect(body.callPhone).to.be.a('string').and.not.empty; });",
+            "pm.test('expiresAt exists', function () { pm.expect(body.expiresAt).to.be.a('string').and.not.empty; });",
+            "pm.environment.set('verificationId', body.verificationId);"
+          ] } }]
+        },
+        {
+          "name": "02 Check Verification Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/auth/phone/{{verificationId}}/status",
+            "description": "1. First run Start Phone Verification.\n2. Call the callPhone returned by it.\n3. Repeat this request until status is VERIFIED.\n\nPENDING is an expected intermediate state. When VERIFIED, this request saves its one-time exchangeToken to the environment. No Bearer token is required."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var body = pm.response.json();",
+            "var statuses = ['PENDING', 'VERIFIED', 'EXPIRED', 'FAILED'];",
+            "pm.test('status is a supported phone verification status', function () { pm.expect(statuses).to.include(body.status); });",
+            "if (body.status === 'VERIFIED') {",
+            "  pm.test('VERIFIED response contains exchangeToken', function () { pm.expect(body.exchangeToken).to.be.a('string').and.not.empty; });",
+            "  if (body.exchangeToken) { pm.environment.set('exchangeToken', body.exchangeToken); }",
+            "}",
+            "if (body.status === 'PENDING') { pm.test('PENDING is an expected intermediate state', function () { pm.expect(body.exchangeToken).to.be.oneOf([null, undefined]); }); }"
+          ] } }]
+        },
+        {
+          "name": "03 Exchange Token",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"verificationId\": \"{{verificationId}}\",\n  \"exchangeToken\": \"{{exchangeToken}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/v1/auth/phone/exchange",
+            "description": "Exchanges the verificationId and one-time exchangeToken returned after VERIFIED for JWT tokens. Run only once after request 02 reports VERIFIED. No Bearer token is required. Tokens are saved to the selected environment and are not logged."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var body = pm.response.json();",
+            "pm.test('accountId exists', function () { pm.expect(body.accountId).to.be.a('string').and.not.empty; });",
+            "pm.test('accessToken exists', function () { pm.expect(body.accessToken).to.be.a('string').and.not.empty; });",
+            "pm.test('refreshToken exists', function () { pm.expect(body.refreshToken).to.be.a('string').and.not.empty; });",
+            "pm.test('tokenType is Bearer', function () { pm.expect(body.tokenType).to.eql('Bearer'); });",
+            "var accessStatuses = ['FREE', 'TRIAL', 'PREMIUM', 'EXPIRED'];",
+            "var expectedAccessStatus = pm.environment.get('expectedAccessStatus');",
+            "pm.test('accessStatus is supported', function () { pm.expect(accessStatuses).to.include(body.accessStatus); });",
+            "if (expectedAccessStatus) { pm.test('accessStatus matches expectedAccessStatus', function () { pm.expect(body.accessStatus).to.eql(expectedAccessStatus); }); }",
+            "if (body.accessStatus === 'TRIAL') { pm.test('TRIAL access has accessExpiresAt', function () { pm.expect(body.accessExpiresAt).to.be.a('string').and.not.empty; }); }",
+            "pm.environment.set('accountId', body.accountId);",
+            "pm.environment.set('accessToken', body.accessToken);",
+            "pm.environment.set('refreshToken', body.refreshToken);"
+          ] } }]
+        }
+      ]
+    },
+    {
+      "name": "VPN",
+      "item": [
+        {
+          "name": "GET VPN Access",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "url": "{{baseUrl}}/api/v1/vpn/access",
+            "description": "Requires accessToken from Exchange Token. A freshly created access can temporarily be PROVISIONING; repeat until READY. expectedAccessStatus is optional: leave it empty to validate only API enum values, or set it to FREE, TRIAL, PREMIUM, or EXPIRED. For a successfully provisioned user the response is READY and configuration is present. Trial quota is null because trial traffic is unlimited. The VLESS configuration is never saved or logged."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var body = pm.response.json();",
+            "var statuses = ['PROVISIONING', 'READY', 'RETRY_REQUIRED'];",
+            "var entitlements = ['FREE', 'TRIAL', 'PREMIUM', 'EXPIRED'];",
+            "pm.test('status is a supported VPN access status', function () { pm.expect(statuses).to.include(body.status); });",
+            "pm.test('entitlement is supported', function () { pm.expect(entitlements).to.include(body.entitlement); });",
+            "var expectedAccessStatus = pm.environment.get('expectedAccessStatus');",
+            "if (expectedAccessStatus) { pm.test('entitlement matches expectedAccessStatus', function () { pm.expect(body.entitlement).to.eql(expectedAccessStatus); }); }",
+            "if (body.entitlement === 'TRIAL') { pm.test('trial quota is unlimited (null)', function () { pm.expect(body.quota).to.eql(null); }); }",
+            "if (body.status === 'READY') {",
+            "  pm.test('READY access contains configuration', function () { pm.expect(body.configuration).to.be.a('string').and.not.empty; });",
+            "} else {",
+            "  pm.test('non-READY state is PROVISIONING or RETRY_REQUIRED', function () { pm.expect(['PROVISIONING', 'RETRY_REQUIRED']).to.include(body.status); });",
+            "}"
+          ] } }]
+        }
+      ]
+    },
+    {
+      "name": "Tariffs",
+      "item": [
+        {
+          "name": "GET Tariffs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "url": "{{baseUrl}}/api/v1/tariffs",
+            "description": "Requires accessToken. The API returns a JSON array, not a wrapper. The selected tariffCode must be available in staging before checkout."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var tariffs = pm.response.json();",
+            "pm.test('response is a tariff array', function () { pm.expect(tariffs).to.be.an('array').and.not.empty; });",
+            "var selected = tariffs.find(function (tariff) { return tariff.code === pm.environment.get('tariffCode'); });",
+            "pm.test('selected tariff exists', function () { pm.expect(selected).to.exist; });",
+            "pm.test('selected tariff currency is RUB', function () { pm.expect(selected.currency).to.eql('RUB'); });"
+          ] } }]
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "POST Checkout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "body": { "mode": "raw", "raw": "{\n  \"tariffCode\": \"{{tariffCode}}\"\n}", "options": { "raw": { "language": "json" } } },
+            "url": "{{baseUrl}}/api/v1/payments/checkout",
+            "description": "Requires accessToken. Open confirmationUrl manually in a browser and complete the YooKassa test payment. confirmationUrl is intentionally not saved to the environment."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var body = pm.response.json();",
+            "pm.test('paymentOrderId exists', function () { pm.expect(body.paymentOrderId).to.be.a('string').and.not.empty; });",
+            "pm.test('status is PENDING', function () { pm.expect(body.status).to.eql('PENDING'); });",
+            "pm.test('confirmationUrl exists', function () { pm.expect(body.confirmationUrl).to.be.a('string').and.not.empty; });",
+            "pm.test('currency is RUB', function () { pm.expect(body.currency).to.eql('RUB'); });",
+            "pm.environment.set('paymentOrderId', body.paymentOrderId);"
+          ] } }]
+        },
+        {
+          "name": "GET Current Payment",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+            "url": "{{baseUrl}}/api/v1/payments/current",
+            "description": "Requires accessToken. Poll after completing YooKassa payment. PENDING and activation states NOT_READY, PENDING, PROCESSING, RETRY_REQUIRED, RECONCILIATION_REQUIRED, and MANUAL_REVIEW_REQUIRED are legitimate intermediate or recovery states. For paymentStatus SUCCEEDED, repeat until activationStatus is ACTIVATED; activation is performed asynchronously."
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+            "var body = pm.response.json();",
+            "var outcomes = ['STILL_PENDING', 'SUCCEEDED', 'ALREADY_SUCCEEDED', 'CANCELED', 'ALREADY_CANCELED', 'TOO_EARLY', 'CHECKOUT_INCOMPLETE', 'MANUAL_REVIEW_REQUIRED', 'PROVIDER_UNAVAILABLE', 'PROVIDER_RESULT_UNCERTAIN', 'NOT_FOUND', 'TERMINAL', 'AMBIGUOUS_PAYMENT_STATE'];",
+            "var paymentStatuses = ['NEW', 'CREATING', 'PENDING', 'SUCCEEDED', 'CANCELED', 'EXPIRED', 'FAILED', 'MANUAL_REVIEW_REQUIRED'];",
+            "var activationStatuses = ['NOT_READY', 'PENDING', 'PROCESSING', 'ACTIVATED', 'RETRY_REQUIRED', 'RECONCILIATION_REQUIRED', 'MANUAL_REVIEW_REQUIRED'];",
+            "pm.test('outcome exists and is supported', function () { pm.expect(outcomes).to.include(body.outcome); });",
+            "if (body.outcome !== 'NOT_FOUND') {",
+            "  pm.test('paymentStatus exists and is supported', function () { pm.expect(paymentStatuses).to.include(body.paymentStatus); });",
+            "  pm.test('activationStatus exists and is supported', function () { pm.expect(activationStatuses).to.include(body.activationStatus); });",
+            "}",
+            "if (body.paymentStatus === 'SUCCEEDED') {",
+            "  pm.test('succeeded payment activation is pending or ACTIVATED', function () { pm.expect(activationStatuses).to.include(body.activationStatus); });",
+            "  if (body.activationStatus === 'ACTIVATED') { pm.test('successful terminal activation is ACTIVATED', function () { pm.expect(body.activationStatus).to.eql('ACTIVATED'); }); }",
+            "}"
+          ] } }]
+        }
+      ]
+    }
+  ]
+}

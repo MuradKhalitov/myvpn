@@ -30,7 +30,7 @@ android {
     buildTypes {
         debug {
             val apiBaseUrl = providers.gradleProperty("myvpnApiBaseUrl")
-                .orElse("http://10.0.2.2:8080/")
+                .orElse("https://api.myvpn05.ru/")
                 .get()
             buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
         }

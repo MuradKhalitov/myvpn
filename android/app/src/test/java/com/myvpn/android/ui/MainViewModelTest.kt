@@ -1,5 +1,10 @@
 package com.myvpn.android.ui
 
+import com.myvpn.android.data.PhoneAuthSource
+import com.myvpn.android.data.PhoneVerificationStartResponse
+import com.myvpn.android.data.PhoneVerificationStatusResponse
+import com.myvpn.android.data.Session
+import com.myvpn.android.data.SessionExpiredException
 import com.myvpn.android.data.VpnAccessResponse
 import com.myvpn.android.data.VpnAccessSource
 import com.myvpn.android.vpn.VpnConnectionState
@@ -9,8 +14,11 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -26,55 +34,135 @@ class MainViewModelTest {
     @Before fun setUp() = Dispatchers.setMain(dispatcher)
     @After fun tearDown() = Dispatchers.resetMain()
 
-    @Test fun permissionDenialCanBeRetriedAndNeverStartsService() = runTest {
-        val engine = FakeEngine()
-        val vm = MainViewModel(ReadySource, engine)
+    @Test fun noTokensStartsAtPhoneEntryWithoutDeviceRegistration() = runTest {
+        val auth = FakeAuth(restored = null)
+        val vm = viewModel(auth, FakeAccess())
         advanceUntilIdle()
-        vm.connect(); assertEquals(MainUiState.AwaitingPermission, vm.state.value)
-        vm.onPermissionResult(false)
-        assertReadyWithMessage(vm, "VPN permission was denied")
-        assertEquals(0, engine.starts)
-        vm.connect(); assertEquals(MainUiState.AwaitingPermission, vm.state.value)
+        assertTrue(vm.state.value is MainUiState.PhoneEntry)
+        assertEquals(0, auth.deviceRegistrationCalls)
     }
 
-    @Test fun grantConnectsOnlyAfterServiceReportsRunningAndDisconnects() = runTest {
-        val engine = FakeEngine()
-        val vm = MainViewModel(ReadySource, engine)
+    @Test fun validExistingSessionUsesAuthenticatedVpnFlow() = runTest {
+        val auth = FakeAuth(restored = session())
+        val vm = viewModel(auth, FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)))
         advanceUntilIdle()
-        vm.connect(); vm.onPermissionResult(true); advanceUntilIdle()
-        assertEquals(1, engine.starts); assertEquals(MainUiState.Connecting, vm.state.value)
-        engine.report(VpnConnectionState.Connected); advanceUntilIdle()
-        assertEquals(MainUiState.Connected, vm.state.value)
-        vm.disconnect(); advanceUntilIdle(); assertEquals(1, engine.stops)
-        assertEquals(MainUiState.Disconnecting, vm.state.value)
-        engine.report(VpnConnectionState.Disconnected); advanceUntilIdle()
         assertTrue(vm.state.value is MainUiState.Ready)
     }
 
-    @Test fun startupFailureLeavesControlledReadyState() = runTest {
-        val engine = FakeEngine(failStart = true)
-        val vm = MainViewModel(ReadySource, engine)
-        advanceUntilIdle(); vm.connect(); vm.onPermissionResult(true); advanceUntilIdle()
-        assertReadyWithMessage(vm, "VPN connection could not be started")
+    @Test fun expiredAccessWithValidRefreshUsesAuthenticatedFlow() = runTest {
+        val auth = FakeAuth(restored = session())
+        val vm = viewModel(auth, FakeAccess(VpnAccessResponse("READY", "PREMIUM", CONFIG, premiumExpiresAt = "2026-09-10T00:00:00Z")))
+        advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Ready)
+        assertEquals("PREMIUM", (vm.state.value as MainUiState.Ready).access.entitlement)
     }
 
-    private fun assertReadyWithMessage(vm: MainViewModel, message: String) {
-        val state = vm.state.value as MainUiState.Ready
-        assertEquals(message, state.message)
+    @Test fun expiredAccessWithFailedRefreshReturnsPhoneEntry() = runTest {
+        val auth = FakeAuth(restored = null)
+        val vm = viewModel(auth, FakeAccess())
+        advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.PhoneEntry)
     }
 
-    private class FakeEngine(private val failStart: Boolean = false) : VpnEngine {
+    @Test fun startPhoneVerificationValidatesAndStarts() = runTest {
+        val auth = FakeAuth(restored = null)
+        val vm = viewModel(auth, FakeAccess())
+        advanceUntilIdle()
+        vm.startPhoneVerification("bad")
+        assertEquals("Введите номер в формате +7 999 123-45-67", (vm.state.value as MainUiState.PhoneEntry).validationMessage)
+        vm.startPhoneVerification("+7 999 123-45-67")
+        advanceUntilIdle()
+        assertEquals(1, auth.starts)
+        assertTrue(vm.state.value is MainUiState.PhoneVerification)
+    }
+
+    @Test fun pendingVerificationContinuesPolling() = runTest {
+        val auth = FakeAuth(restored = null, statuses = mutableListOf(PhoneVerificationStatusResponse("PENDING"), PhoneVerificationStatusResponse("PENDING")))
+        val vm = startVerification(auth)
+        vm.onReturnedFromDialer(); runCurrent()
+        assertEquals(1, auth.statusCalls)
+        advanceTimeBy(2_000); runCurrent()
+        assertEquals(2, auth.statusCalls)
+        assertTrue(vm.state.value is MainUiState.PhoneVerification)
+        vm.stopPhoneVerificationPolling()
+        advanceTimeBy(2_000); runCurrent()
+        assertEquals(2, auth.statusCalls)
+    }
+
+    @Test fun verifiedExchangesExactlyOnceAndSavesSession() = runTest {
+        val auth = FakeAuth(restored = null, statuses = mutableListOf(PhoneVerificationStatusResponse("VERIFIED", "exchange-token")))
+        val vm = startVerification(auth)
+        vm.onReturnedFromDialer(); advanceUntilIdle()
+        assertEquals(1, auth.exchanges)
+        assertEquals(1, auth.savedSessions)
+        assertTrue(vm.state.value is MainUiState.Ready)
+        vm.onReturnedFromDialer(); advanceUntilIdle()
+        assertEquals(1, auth.exchanges)
+    }
+
+    @Test fun expiredAndFailedVerificationHaveDedicatedErrors() = runTest {
+        val expired = FakeAuth(restored = null, statuses = mutableListOf(PhoneVerificationStatusResponse("EXPIRED")))
+        val expiredVm = startVerification(expired); expiredVm.onReturnedFromDialer(); advanceUntilIdle()
+        assertEquals(AppError.VERIFICATION_EXPIRED, (expiredVm.state.value as MainUiState.Error).type)
+        val failed = FakeAuth(restored = null, statuses = mutableListOf(PhoneVerificationStatusResponse("FAILED")))
+        val failedVm = startVerification(failed); failedVm.onReturnedFromDialer(); advanceUntilIdle()
+        assertEquals(AppError.VERIFICATION_FAILED, (failedVm.state.value as MainUiState.Error).type)
+    }
+
+    @Test fun provisioningPollsUntilReady() = runTest {
+        val access = FakeAccess(VpnAccessResponse("PROVISIONING", "TRIAL"), VpnAccessResponse("READY", "TRIAL", CONFIG))
+        val vm = viewModel(FakeAuth(restored = session()), access)
+        runCurrent(); assertTrue(vm.state.value is MainUiState.VpnProvisioning)
+        advanceTimeBy(2_000); runCurrent(); assertTrue(vm.state.value is MainUiState.Ready)
+    }
+
+    @Test fun retryRequiredIsDedicatedVpnRecoveryError() = runTest {
+        val vm = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("RETRY_REQUIRED", "TRIAL")))
+        advanceUntilIdle()
+        assertEquals(AppError.VPN_PROVISIONING_FAILED, (vm.state.value as MainUiState.Error).type)
+    }
+
+    @Test fun trialPremiumAndExpiredUseDistinctUiStates() = runTest {
+        val trial = viewModel(FakeAuth(restored = session(accessStatus = "TRIAL")), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)))
+        advanceUntilIdle(); assertEquals("TRIAL", (trial.state.value as MainUiState.Ready).access.entitlement)
+        val premium = viewModel(FakeAuth(restored = session(accessStatus = "PREMIUM")), FakeAccess(VpnAccessResponse("READY", "PREMIUM", CONFIG, premiumExpiresAt = "2026-09-10T00:00:00Z")))
+        advanceUntilIdle(); assertEquals("PREMIUM", (premium.state.value as MainUiState.Ready).access.entitlement)
+        val expired = viewModel(FakeAuth(restored = session(accessStatus = "EXPIRED")), FakeAccess(VpnAccessResponse("READY", "EXPIRED")))
+        advanceUntilIdle(); assertTrue(expired.state.value is MainUiState.Expired)
+    }
+
+    @Test fun dialRequestUsesProviderCallPhone() {
+        assertEquals(DialRequest("android.intent.action.DIAL", "tel:+79991234567"), dialRequest("+79991234567"))
+    }
+
+    private suspend fun TestScope.startVerification(auth: FakeAuth): MainViewModel {
+        val vm = viewModel(auth, FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)))
+        advanceUntilIdle(); vm.startPhoneVerification("+79991234567"); advanceUntilIdle()
+        return vm
+    }
+    private fun viewModel(auth: FakeAuth, access: FakeAccess) = MainViewModel(auth, access, FakeEngine(), 2_000)
+    private fun session(accessStatus: String = "TRIAL") = Session("access", "refresh", 3600, "account", accessStatus, "2026-09-10T00:00:00Z")
+
+    private class FakeAuth(
+        private val restored: Session?,
+        private val statuses: MutableList<PhoneVerificationStatusResponse> = mutableListOf(),
+        private val started: PhoneVerificationStartResponse = PhoneVerificationStartResponse("verification", "+79991234567", "+7 999 123-45-67", "2026-09-10T00:00:00Z")
+    ) : PhoneAuthSource {
+        var starts = 0; var statusCalls = 0; var exchanges = 0; var savedSessions = 0; var deviceRegistrationCalls = 0
+        override suspend fun restoreSession() = restored
+        override suspend fun startVerification(phone: String): PhoneVerificationStartResponse { starts++; return started }
+        override suspend fun verificationStatus(verificationId: String): PhoneVerificationStatusResponse { statusCalls++; return statuses.removeFirstOrNull() ?: PhoneVerificationStatusResponse("PENDING") }
+        override suspend fun exchange(verificationId: String, exchangeToken: String): Session { exchanges++; savedSessions++; return Session("access", "refresh", 3600, "account", "TRIAL", "2026-09-10T00:00:00Z") }
+    }
+    private class FakeAccess(vararg values: VpnAccessResponse) : VpnAccessSource {
+        private val queue = values.toMutableList()
+        override suspend fun current() = if (queue.isNotEmpty()) queue.removeAt(0) else VpnAccessResponse("READY", "TRIAL", CONFIG)
+    }
+    private class FakeEngine : VpnEngine {
         private val mutable = MutableStateFlow<VpnConnectionState>(VpnConnectionState.Disconnected)
         override val state: StateFlow<VpnConnectionState> = mutable
-        var starts = 0; var stops = 0
-        override suspend fun start(configuration: String) { starts++; if (failStart) error("native failure") }
-        override suspend fun stop() { stops++ }
-        fun report(state: VpnConnectionState) { mutable.value = state }
+        override suspend fun start(configuration: String) { mutable.value = VpnConnectionState.Connecting }
+        override suspend fun stop() { mutable.value = VpnConnectionState.Disconnecting }
     }
-
-    private object ReadySource : VpnAccessSource {
-        override suspend fun current() = VpnAccessResponse("READY", "FREE", CONFIG)
-    }
-
     private companion object { const val CONFIG = "vless://123e4567-e89b-12d3-a456-426614174000@vpn.example.test:443?type=tcp&security=reality&encryption=none&sni=s&fp=chrome&pbk=p&sid=a" }
 }
