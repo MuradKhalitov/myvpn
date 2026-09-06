@@ -30,6 +30,7 @@ public class SecurityConfiguration {
                                 "/api/v1/auth/phone/start",
                                 "/api/v1/auth/phone/exchange").permitAll()
                         .pathMatchers(HttpMethod.GET, "/api/v1/auth/phone/*/status").permitAll()
+                        .pathMatchers(HttpMethod.GET, "/api/v1/app/version").permitAll()
                         .anyExchange().authenticated())
                 .oauth2ResourceServer(resourceServer -> resourceServer.jwt(jwt -> { }))
                 .build();
@@ -42,6 +43,7 @@ public class SecurityConfiguration {
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .authorizeExchange(exchanges -> exchanges
                         .pathMatchers("/actuator/health",
+                                "/api/v1/app/version",
                                 "/api/payments/yookassa/webhook",
                                 "/api/payments/yookassa/return").permitAll()
                         .anyExchange().denyAll())

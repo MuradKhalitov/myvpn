@@ -1,6 +1,14 @@
 spring:
   application:
     name: myvpn
+
+app:
+  android:
+    latest-version-code: ${ANDROID_LATEST_VERSION_CODE:1}
+    latest-version-name: ${ANDROID_LATEST_VERSION_NAME:1.0.0}
+    minimum-supported-version-code: ${ANDROID_MIN_SUPPORTED_VERSION_CODE:1}
+    apk-url: ${ANDROID_APK_URL:https://api.myvpn05.ru/downloads/myvpn-1.0.0.apk}
+    changelog: ${ANDROID_CHANGELOG:Первая публичная версия MyVPN}
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}

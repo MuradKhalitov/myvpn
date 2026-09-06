@@ -43,4 +43,18 @@ class SecurityConfigurationIntegrationTest extends AuthIntegrationTestSupport {
         webTestClient.get().uri("/actuator/health")
                 .exchange().expectStatus().isOk();
     }
+
+    @Test
+    void androidVersionEndpointIsPublicWhileProtectedEndpointsStillRequireBearer() {
+        webTestClient.get().uri("/api/v1/app/version")
+                .exchange().expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.latestVersionCode").isEqualTo(1)
+                .jsonPath("$.latestVersionName").isEqualTo("1.0.0")
+                .jsonPath("$.minimumSupportedVersionCode").isEqualTo(1)
+                .jsonPath("$.apkUrl").isEqualTo("https://api.myvpn05.ru/downloads/myvpn-1.0.0.apk")
+                .jsonPath("$.changelog").isEqualTo("Первая публичная версия MyVPN");
+        webTestClient.get().uri("/api/v1/vpn/access")
+                .exchange().expectStatus().isUnauthorized();
+    }
 }
