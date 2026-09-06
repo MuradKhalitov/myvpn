@@ -7,9 +7,15 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import ru.murad.myvpn.application.auth.InvalidAuthenticationException;
+import ru.murad.myvpn.application.auth.RefreshTokenService;
 import ru.murad.myvpn.support.AuthIntegrationTestSupport;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -19,6 +25,8 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
 
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private RefreshTokenService refreshTokenService;
 
     @Test
     void fullOtpRefreshRotationAndLogoutFlow() throws Exception {
@@ -64,6 +72,40 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
                 "{\"email\":\"unknown@example.com\",\"code\":\"000000\"}", 401);
 
         assertThat(response.path("code").asText()).isEqualTo("INVALID_AUTHENTICATION");
+    }
+
+    @Test
+    void concurrentRefreshRotationAcceptsOnlyTheCurrentCredentialOnce() throws Exception {
+        webTestClient.post().uri("/api/v1/auth/otp/request")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"email\":\"user@example.com\"}").exchange().expectStatus().isAccepted();
+        ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
+        verify(emailSender).sendOtp(any(), code.capture(), any());
+        String refresh = postJson("/api/v1/auth/otp/verify",
+                "{\"email\":\"user@example.com\",\"code\":\"" + code.getValue() + "\"}", 200)
+                .path("refreshToken").asText();
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Throwable> failures = List.of(
+                    CompletableFuture.supplyAsync(() -> refreshFailure(refresh), executor),
+                    CompletableFuture.supplyAsync(() -> refreshFailure(refresh), executor))
+                    .stream().map(CompletableFuture::join).filter(value -> value != null).toList();
+            assertThat(failures).hasSize(1).allMatch(InvalidAuthenticationException.class::isInstance);
+        } finally {
+            executor.shutdownNow();
+        }
+        assertThat(sessionRepository.findAll()).singleElement()
+                .satisfies(session -> assertThat(session.getRotationCounter()).isEqualTo(1));
+    }
+
+    private Throwable refreshFailure(String refresh) {
+        try {
+            refreshTokenService.refresh(refresh);
+            return null;
+        } catch (Throwable failure) {
+            return failure;
+        }
     }
 
     private JsonNode postJson(String uri, String body, int status) throws Exception {

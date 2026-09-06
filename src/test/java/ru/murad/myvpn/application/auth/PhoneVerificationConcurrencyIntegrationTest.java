@@ -33,6 +33,7 @@ import static org.mockito.Mockito.when;
 class PhoneVerificationConcurrencyIntegrationTest extends AuthIntegrationTestSupport {
     @MockBean PhoneVerificationProvider phoneProvider;
     @Autowired PhoneVerificationService phoneService;
+    @Autowired RefreshTokenHashService refreshTokenHashService;
 
     @DynamicPropertySource
     static void phoneProperties(DynamicPropertyRegistry registry) {
@@ -79,6 +80,31 @@ class PhoneVerificationConcurrencyIntegrationTest extends AuthIntegrationTestSup
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> phoneService.exchange(start.verificationId(), "invalid"))
                 .isInstanceOf(RuntimeException.class);
         assertThat(sessionRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void aNewPhoneExchangeForExistingAccountCreatesNewSessionWithoutGrantingAnotherTrial() {
+        PhoneVerificationStartResponse first = start("check-first-session");
+        when(phoneProvider.getStatus("check-first-session")).thenReturn(PhoneVerificationState.VERIFIED);
+        String firstExchange = phoneService.status(first.verificationId()).exchangeToken();
+        PhoneAuthResponse firstAuth = phoneService.exchange(first.verificationId(), firstExchange);
+        Instant originalTrialGrantedAt = accountRepository.findById(firstAuth.accountId()).orElseThrow().getTrialGrantedAt();
+
+        Instant now = Instant.now();
+        String secondExchange = "second-exchange-token";
+        PhoneVerification second = phoneVerificationRepository.save(PhoneVerification.builder()
+                .id(UUID.randomUUID()).phone("+79991234567").requestIp("127.0.0.1")
+                .provider("SMS_RU").providerCheckId("check-second-session").callPhone("7800")
+                .status(PhoneVerificationStatus.VERIFIED).createdAt(now).expiresAt(now.plusSeconds(300))
+                .verifiedAt(now).accountId(firstAuth.accountId())
+                .exchangeTokenHash(refreshTokenHashService.hash(secondExchange))
+                .exchangeExpiresAt(now.plusSeconds(120)).build());
+        PhoneAuthResponse secondAuth = phoneService.exchange(second.getId(), secondExchange);
+
+        assertThat(secondAuth.accountId()).isEqualTo(firstAuth.accountId());
+        assertThat(accountRepository.findById(firstAuth.accountId()).orElseThrow().getTrialGrantedAt())
+                .isEqualTo(originalTrialGrantedAt);
+        assertThat(sessionRepository.count()).isEqualTo(2);
     }
 
     @Test

@@ -37,3 +37,7 @@ application-secrets.yml
 *.jks
 *.keystore
 keystore.properties
+### Android / Gradle generated files ###
+android/.gradle/
+android/app/build/
+android/build/

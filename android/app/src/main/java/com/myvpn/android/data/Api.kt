@@ -33,7 +33,7 @@ interface PhoneAuthSource {
     suspend fun exchange(verificationId: String, exchangeToken: String): Session
 }
 
-class PhoneAuthRepository(private val api: MyVpnApi, private val store: DeviceIdentityStore) : PhoneAuthSource {
+class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionStore) : PhoneAuthSource {
     private val mutex = Mutex()
     @Volatile private var currentSession: Session? = null
 
@@ -54,22 +54,34 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: DeviceId
     }
 
     suspend fun accessToken(): String = (currentSession ?: restoreSession() ?: throw SessionExpiredException()).accessToken
-    suspend fun refreshAfterUnauthorized(): String = mutex.withLock {
+    /**
+     * A batch of requests can observe the same expired access token.  Only the
+     * first holder rotates its refresh credential; waiters reuse that result.
+     */
+    suspend fun refreshAfterUnauthorized(failedAccessToken: String): String = mutex.withLock {
         val saved = currentSession ?: store.session() ?: throw SessionExpiredException()
+        if (saved.accessToken != failedAccessToken && saved.accessTokenIsValid()) {
+            return@withLock saved.accessToken
+        }
         (refresh(saved) ?: throw SessionExpiredException()).accessToken
     }
 
-    private suspend fun refresh(previous: Session): Session? = runCatching {
+    private suspend fun refresh(previous: Session): Session? = try {
         val response = api.refresh(RefreshRequest(previous.refreshToken))
         Session(response.accessToken, response.refreshToken, response.expiresIn, previous.accountId, previous.accessStatus, previous.accessExpiresAt).also { session ->
             currentSession = session
             store.save(session)
         }
-    }.getOrNull().also { refreshed ->
-        if (refreshed == null) {
+    } catch (exception: HttpException) {
+        if (exception.code() == 401 || exception.code() == 403) {
             currentSession = null
             store.clear()
+            null
+        } else {
+            throw SessionRefreshUnavailableException(exception)
         }
+    } catch (exception: java.io.IOException) {
+        throw SessionRefreshUnavailableException(exception)
     }
 }
 
@@ -88,7 +100,7 @@ class VpnAccessRepository(private val api: MyVpnApi, private val auth: PhoneAuth
             api.access("Bearer $token")
         } catch (exception: HttpException) {
             if (exception.code() != 401) throw exception
-            api.access("Bearer ${auth.refreshAfterUnauthorized()}")
+            api.access("Bearer ${auth.refreshAfterUnauthorized(token)}")
         }
     }
 }

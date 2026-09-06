@@ -6,6 +6,7 @@ import com.myvpn.android.data.PhoneAuthSource
 import com.myvpn.android.data.PhoneVerificationStartResponse
 import com.myvpn.android.data.Session
 import com.myvpn.android.data.SessionExpiredException
+import com.myvpn.android.data.SessionRefreshUnavailableException
 import com.myvpn.android.data.VpnAccessResponse
 import com.myvpn.android.data.VpnAccessSource
 import com.myvpn.android.vpn.VpnConnectionState
@@ -80,7 +81,15 @@ class MainViewModel(
     fun restoreAuth() {
         pollingJob?.cancel(); vpnJob?.cancel()
         viewModelScope.launch {
-            val restored = runCatching { auth.restoreSession() }.getOrNull()
+            val restored = try {
+                auth.restoreSession()
+            } catch (failure: SessionRefreshUnavailableException) {
+                _state.value = errorFor(failure.cause ?: failure, AppError.SESSION_EXPIRED)
+                return@launch
+            } catch (failure: Throwable) {
+                _state.value = errorFor(failure, AppError.SESSION_EXPIRED)
+                return@launch
+            }
             if (restored == null) {
                 _state.value = MainUiState.PhoneEntry()
             } else {
@@ -183,7 +192,7 @@ class MainViewModel(
             is MainUiState.Error -> when (current.type) {
                 AppError.VERIFICATION_EXPIRED, AppError.VERIFICATION_FAILED -> { activeVerification = null; exchangeStarted = false; _state.value = MainUiState.PhoneEntry() }
                 AppError.EXCHANGE_FAILED -> { exchangeStarted = false; onReturnedFromDialer() }
-                AppError.SESSION_EXPIRED -> restoreAuth()
+                AppError.SESSION_EXPIRED, AppError.NETWORK_UNAVAILABLE, AppError.BACKEND_UNAVAILABLE -> if (session == null) restoreAuth() else loadVpn()
                 else -> if (session == null) _state.value = MainUiState.PhoneEntry() else loadVpn()
             }
             else -> loadVpn()

@@ -38,7 +38,7 @@ public class RefreshTokenService {
         }
 
         String nextRefreshToken = refreshTokenGenerator.generate();
-        session.rotate(refreshHmac.hash(nextRefreshToken), now);
+        session.rotate(refreshHmac.hash(nextRefreshToken), now, properties.refresh().ttl());
         sessionRepository.flush();
         String accessToken = jwtTokenService.issue(
                 session.getAccount().getId(), session.getId());

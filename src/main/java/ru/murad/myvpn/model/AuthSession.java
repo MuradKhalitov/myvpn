@@ -15,6 +15,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.time.Duration;
 import java.util.UUID;
 
 @Entity
@@ -61,10 +62,16 @@ public class AuthSession {
         return revokedAt == null && now.isBefore(expiresAt);
     }
 
-    public void rotate(String newRefreshTokenHash, Instant now) {
+    /**
+     * Refresh sessions use a sliding inactivity window.  A successful rotation
+     * is proof that the holder still has the current credential, so extend the
+     * server-side session without making the access JWT long-lived.
+     */
+    public void rotate(String newRefreshTokenHash, Instant now, Duration inactivityTtl) {
         refreshTokenHash = newRefreshTokenHash;
         rotationCounter++;
         lastUsedAt = now;
+        expiresAt = now.plus(inactivityTtl);
     }
 
     public void revoke(Instant now) {

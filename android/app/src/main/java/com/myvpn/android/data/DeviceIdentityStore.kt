@@ -21,7 +21,13 @@ import javax.crypto.spec.GCMParameterSpec
 private val Context.ds by preferencesDataStore("myvpn_device")
 
 /** Keeps legacy device identity and the PHONE-auth session encrypted with Android Keystore. */
-class DeviceIdentityStore(private val context: Context) {
+interface SessionStore {
+    suspend fun session(): Session?
+    suspend fun save(session: Session)
+    suspend fun clear()
+}
+
+class DeviceIdentityStore(private val context: Context) : SessionStore {
     private val install = stringPreferencesKey("install")
     private val secret = stringPreferencesKey("secret")
     private val access = stringPreferencesKey("access")
@@ -39,14 +45,14 @@ class DeviceIdentityStore(private val context: Context) {
         return installId to decrypt(deviceSecret)
     }
 
-    suspend fun session(): Session? {
+    override suspend fun session(): Session? {
         val preferences = context.ds.data.first()
         val encryptedAccess = preferences[access] ?: return null
         val encryptedRefresh = preferences[refresh] ?: return null
         return Session(decrypt(encryptedAccess), decrypt(encryptedRefresh), 0, preferences[accountId], preferences[accessStatus], preferences[accessExpiresAt], preferences[expiresAt] ?: 0)
     }
 
-    suspend fun save(session: Session) {
+    override suspend fun save(session: Session) {
         context.ds.edit {
             it[access] = encrypt(session.accessToken)
             it[refresh] = encrypt(session.refreshToken)
@@ -57,7 +63,9 @@ class DeviceIdentityStore(private val context: Context) {
         }
     }
 
-    suspend fun clear() = context.ds.edit { it.remove(access); it.remove(refresh); it.remove(accountId); it.remove(accessStatus); it.remove(accessExpiresAt); it.remove(expiresAt) }
+    override suspend fun clear() {
+        context.ds.edit { it.remove(access); it.remove(refresh); it.remove(accountId); it.remove(accessStatus); it.remove(accessExpiresAt); it.remove(expiresAt) }
+    }
 
     private fun newSecret() = ByteArray(32).also { SecureRandom().nextBytes(it) }.let { Base64.encodeToString(it, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING) }
     private fun key(): SecretKey {

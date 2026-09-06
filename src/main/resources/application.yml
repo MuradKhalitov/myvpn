@@ -128,7 +128,9 @@ auth:
     private-key-base64: ${AUTH_JWT_PRIVATE_KEY_BASE64:}
     public-key-base64: ${AUTH_JWT_PUBLIC_KEY_BASE64:}
   refresh:
-    ttl: ${AUTH_REFRESH_TTL:30d}
+    # Sliding inactivity timeout for the server-side refresh session. Each
+    # successful rotation renews this window; access JWTs remain short-lived.
+    ttl: ${AUTH_REFRESH_TTL:365d}
     pepper: ${AUTH_REFRESH_PEPPER:}
 
 security:

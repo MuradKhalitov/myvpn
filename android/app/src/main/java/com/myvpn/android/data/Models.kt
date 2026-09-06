@@ -27,3 +27,6 @@ data class Session(
 }
 
 class SessionExpiredException : IllegalStateException()
+
+/** A transient refresh failure. The encrypted session must be retained for retry. */
+class SessionRefreshUnavailableException(cause: Throwable) : IllegalStateException(cause)

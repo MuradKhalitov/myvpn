@@ -47,6 +47,7 @@ class RefreshTokenServiceTest {
         assertThat(tokens.getRefreshToken()).isEqualTo("next-token");
         assertThat(session.getRefreshTokenHash()).isEqualTo("next-hash");
         assertThat(session.getRotationCounter()).isEqualTo(1);
+        assertThat(session.getExpiresAt()).isEqualTo(now.plus(Duration.ofDays(365)));
 
         when(hashService.hash("reused-token")).thenReturn("missing-hash");
         assertThatThrownBy(() -> service.refresh("reused-token"))
@@ -58,6 +59,6 @@ class RefreshTokenServiceTest {
                 new AuthProperties.Otp(Duration.ofMinutes(5), Duration.ofMinutes(1), 5, "otp"),
                 new AuthProperties.Jwt("https://auth.myvpn.local", "android", Duration.ofMinutes(15),
                         "key", "private", "public"),
-                new AuthProperties.Refresh(Duration.ofDays(30), "refresh"));
+                new AuthProperties.Refresh(Duration.ofDays(365), "refresh"));
     }
 }
