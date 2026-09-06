@@ -22,6 +22,7 @@ interface MyVpnApi {
     @POST("api/v1/auth/phone/start") suspend fun startPhone(@Body request: PhoneVerificationStartRequest): PhoneVerificationStartResponse
     @GET("api/v1/auth/phone/{verificationId}/status") suspend fun phoneStatus(@Path("verificationId") verificationId: String): PhoneVerificationStatusResponse
     @POST("api/v1/auth/phone/exchange") suspend fun exchangePhone(@Body request: PhoneVerificationExchangeRequest): PhoneAuthResponse
+    @GET("api/v1/app/version") suspend fun appVersion(): AppVersionResponse
     @GET("api/v1/vpn/access") suspend fun access(@Header("Authorization") bearer: String): VpnAccessResponse
 }
 
@@ -73,6 +74,12 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: DeviceId
 }
 
 interface VpnAccessSource { suspend fun current(): VpnAccessResponse }
+
+interface AppVersionSource { suspend fun current(): AppVersionResponse }
+
+class AppVersionRepository(private val api: MyVpnApi) : AppVersionSource {
+    override suspend fun current(): AppVersionResponse = api.appVersion()
+}
 
 class VpnAccessRepository(private val api: MyVpnApi, private val auth: PhoneAuthRepository) : VpnAccessSource {
     override suspend fun current(): VpnAccessResponse {

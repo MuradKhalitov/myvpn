@@ -12,6 +12,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class PhoneAuthResponse(val accountId: String, val accessToken: String, val refreshToken: String, val tokenType: String = "Bearer", val expiresIn: Long, val accessStatus: String, val accessExpiresAt: String? = null)
 @Serializable data class VpnQuota(val limitBytes: Long, val periodStartedAt: String? = null, val periodEndsAt: String? = null)
 @Serializable data class VpnAccessResponse(val status: String, val entitlement: String, val configuration: String? = null, val quota: VpnQuota? = null, val premiumExpiresAt: String? = null)
+@Serializable data class AppVersionResponse(val latestVersionCode: Long, val latestVersionName: String, val minimumSupportedVersionCode: Long, val apkUrl: String, val changelog: String)
 
 data class Session(
     val accessToken: String,

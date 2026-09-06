@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.myvpn.android.MyVpnApplication
+import com.myvpn.android.BuildConfig
 import com.myvpn.android.data.Session
 import com.myvpn.android.data.VpnAccessResponse
 import kotlinx.coroutines.delay
@@ -62,21 +64,55 @@ class MainActivity : ComponentActivity() {
         val dialer = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { viewModel?.onReturnedFromDialer() }
         setContent {
             val vm = remember { MainViewModel(app.phoneAuth, app.access, app.engine) }
+            val updateVm = remember { UpdateViewModel(app.appVersion, BuildConfig.VERSION_CODE) }
             DisposableEffect(Unit) { viewModel = vm; onDispose { viewModel = null } }
             val state by vm.state.collectAsState()
+            val updateDecision by updateVm.decision.collectAsState()
             LaunchedEffect(state) { if (state is MainUiState.AwaitingPermission) VpnService.prepare(this@MainActivity)?.let(permission::launch) ?: vm.onPermissionResult(true) }
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    MainScreen(state, vm) { callPhone -> dialer.launch(dialIntent(callPhone)) }
+                    Box {
+                        MainScreen(state, vm) { callPhone -> dialer.launch(dialIntent(callPhone)) }
+                        UpdateDialog(updateDecision, updateVm::dismissOptional) { apkUrl -> openUpdate(apkUrl) }
+                    }
                 }
             }
         }
+    }
+
+    private fun openUpdate(apkUrl: String) {
+        updateIntent(apkUrl)?.let { intent -> runCatching { startActivity(intent) } }
     }
 }
 
 internal data class DialRequest(val action: String, val uri: String)
 internal fun dialRequest(callPhone: String) = DialRequest(Intent.ACTION_DIAL, "tel:$callPhone")
 internal fun dialIntent(callPhone: String): Intent = dialRequest(callPhone).let { Intent(it.action, Uri.parse(it.uri)) }
+internal fun updateUrl(apkUrl: String): String? = apkUrl.takeIf(UpdatePolicy::isHttpsUrl)
+internal fun updateIntent(apkUrl: String): Intent? = updateUrl(apkUrl)?.let { Intent(Intent.ACTION_VIEW, Uri.parse(it)) }
+
+@Composable
+private fun UpdateDialog(decision: UpdateDecision, onLater: () -> Unit, onUpdate: (String) -> Unit) {
+    val update = when (decision) {
+        UpdateDecision.None -> return
+        is UpdateDecision.Optional -> decision.update
+        is UpdateDecision.Mandatory -> decision.update
+    }
+    val mandatory = decision is UpdateDecision.Mandatory
+    AlertDialog(
+        onDismissRequest = { if (!mandatory) onLater() },
+        title = { Text(if (mandatory) "Требуется обновление" else "Доступно обновление") },
+        text = {
+            Column {
+                if (mandatory) Text("Эта версия MyVPN больше не поддерживается.")
+                Text("Версия ${update.versionName}", style = MaterialTheme.typography.titleMedium)
+                if (update.changelog.isNotBlank()) Text(update.changelog, modifier = Modifier.padding(top = 12.dp))
+            }
+        },
+        confirmButton = { Button(onClick = { onUpdate(update.apkUrl) }) { Text("Обновить") } },
+        dismissButton = if (mandatory) null else { { OutlinedButton(onClick = onLater) { Text("Позже") } } }
+    )
+}
 
 @Composable
 private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -> Unit) {
