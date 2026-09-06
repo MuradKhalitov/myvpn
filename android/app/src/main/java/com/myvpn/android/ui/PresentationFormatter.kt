@@ -10,6 +10,8 @@ object PresentationFormatter {
     private val locale = Locale("ru", "RU")
     private val dateFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", locale)
 
+    fun versionLabel(versionName: String): String = "Версия $versionName"
+
     fun premiumUntil(iso: String?): String? = iso?.let { value ->
         runCatching { "До ${Instant.parse(value).atZone(ZoneId.systemDefault()).format(dateFormatter)}" }.getOrNull()
     }

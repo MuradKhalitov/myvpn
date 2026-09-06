@@ -72,7 +72,12 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Box {
-                        MainScreen(state, vm) { callPhone -> dialer.launch(dialIntent(callPhone)) }
+                        MainScreen(
+                            state = state,
+                            vm = vm,
+                            onDial = { callPhone -> dialer.launch(dialIntent(callPhone)) },
+                            onShare = { AppSharing.shareApp(this@MainActivity) }
+                        )
                         UpdateDialog(updateDecision, updateVm::dismissOptional) { apkUrl -> openUpdate(apkUrl) }
                     }
                 }
@@ -115,7 +120,7 @@ private fun UpdateDialog(decision: UpdateDecision, onLater: () -> Unit, onUpdate
 }
 
 @Composable
-private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -> Unit) {
+private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -> Unit, onShare: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("MyVPN", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(32.dp))
@@ -124,9 +129,9 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -
             is MainUiState.PhoneEntry -> PhoneEntry(state, vm)
             is MainUiState.PhoneVerification -> PhoneVerification(state, vm, onDial)
             is MainUiState.VpnProvisioning -> Loading("Настраиваем VPN")
-            is MainUiState.Ready -> VpnScreen(state.access, state.session, connected = false, state.message, vm)
-            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, null, vm)
-            is MainUiState.Expired -> ExpiredScreen(state.message, vm)
+            is MainUiState.Ready -> VpnScreen(state.access, state.session, connected = false, state.message, vm, onShare)
+            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, null, vm, onShare)
+            is MainUiState.Expired -> ExpiredScreen(state.message, vm, onShare)
             is MainUiState.Error -> ErrorScreen(state, vm)
         }
     }
@@ -180,13 +185,14 @@ private fun PhoneVerification(state: MainUiState.PhoneVerification, vm: MainView
 }
 
 @Composable
-private fun VpnScreen(access: VpnAccessResponse, session: Session, connected: Boolean, message: String?, vm: MainViewModel) {
+private fun VpnScreen(access: VpnAccessResponse, session: Session, connected: Boolean, message: String?, vm: MainViewModel, onShare: () -> Unit) {
     ConnectionHeader(connected)
     Spacer(Modifier.height(28.dp))
     EntitlementCard(access, session)
     message?.let { Text(it, modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.error) }
     Spacer(Modifier.height(32.dp))
     Button(onClick = { if (connected) vm.disconnect() else vm.connect() }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (connected) "Отключить VPN" else "Подключить VPN") }
+    AppFooter(onShare)
 }
 
 @Composable
@@ -224,7 +230,7 @@ private fun EntitlementCard(access: VpnAccessResponse, session: Session) {
 }
 
 @Composable
-private fun ExpiredScreen(message: String, vm: MainViewModel) {
+private fun ExpiredScreen(message: String, vm: MainViewModel, onShare: () -> Unit) {
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
         Column(Modifier.padding(24.dp)) {
             Text("Доступ закончился", style = MaterialTheme.typography.headlineSmall)
@@ -234,6 +240,19 @@ private fun ExpiredScreen(message: String, vm: MainViewModel) {
             Button(onClick = vm::retry, modifier = Modifier.fillMaxWidth()) { Text("Выбрать тариф") }
         }
     }
+    AppFooter(onShare)
+}
+
+@Composable
+private fun AppFooter(onShare: () -> Unit) {
+    Spacer(Modifier.height(24.dp))
+    OutlinedButton(onClick = onShare, modifier = Modifier.fillMaxWidth()) { Text("Поделиться приложением") }
+    Spacer(Modifier.height(12.dp))
+    Text(
+        PresentationFormatter.versionLabel(BuildConfig.VERSION_NAME),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
 }
 
 @Composable

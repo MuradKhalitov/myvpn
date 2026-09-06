@@ -7,6 +7,10 @@ import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PresentationFormatterTest {
+    @Test fun versionLabelUsesSuppliedVersionName() {
+        assertEquals("Версия 1.0.0", PresentationFormatter.versionLabel("1.0.0"))
+    }
+
     @Test fun premiumIsoIsRenderedAsRussianDate() {
         assertEquals("До 9 октября 2026", PresentationFormatter.premiumUntil("2026-10-09T20:26:46.589978Z"))
     }
