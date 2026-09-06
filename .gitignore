@@ -34,3 +34,6 @@ android/.native/
 !.env.staging.example
 application-secrets.yml
 *.log
+*.jks
+*.keystore
+keystore.properties
