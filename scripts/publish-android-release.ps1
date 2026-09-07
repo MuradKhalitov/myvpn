@@ -17,6 +17,13 @@ Set-StrictMode -Version Latest
 $LatestApkUrl = "https://api.myvpn05.ru/downloads/myvpn-latest.apk"
 $PublicBaseUrl = "https://api.myvpn05.ru"
 $ExpectedApkContentType = "application/vnd.android.package-archive"
+$RemoteProjectDirectory = "/opt/myvpn/myvpn"
+$RemoteDownloadsDirectory = "/var/www/myvpn/downloads"
+
+function Write-Stage {
+    param([int]$Number, [string]$Name)
+    Write-Output "[$Number/7] $Name"
+}
 
 function Assert-NativeSuccess {
     param([string]$Description)
@@ -70,11 +77,22 @@ function Assert-ApkHttpResponse {
     }
 }
 
+function Invoke-CurlJson {
+    param([string]$Uri, [string]$Description)
+    $body = & curl.exe -fsS --connect-timeout 10 --max-time 20 $Uri
+    Assert-NativeSuccess $Description
+    try {
+        return $body | ConvertFrom-Json
+    } catch {
+        throw "$Description returned invalid JSON."
+    }
+}
+
 function Wait-ForHealth {
     param([string]$Uri, [int]$Attempts = 30)
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         try {
-            $health = Invoke-RestMethod -Uri $Uri -Method Get
+            $health = Invoke-CurlJson $Uri "Health request"
             if ($health.status -eq "UP") { return }
         } catch {
             # The app can be unavailable while Docker recreates it.
@@ -86,6 +104,11 @@ function Wait-ForHealth {
 
 $originalLocation = Get-Location
 $exitCode = 0
+$currentStage = "Validation"
+$versionPersisted = $false
+$remoteApkUploaded = $false
+$latestSymlinkSwitched = $false
+$recoveryCommand = $null
 
 try {
     if ([string]::IsNullOrWhiteSpace($VersionName)) { throw "VersionName must not be empty." }
@@ -98,7 +121,7 @@ try {
     if ($VpsHost -notmatch '^[A-Za-z0-9.-]+$') { throw "VpsHost has an invalid format." }
     if ($VpsUser -notmatch '^[A-Za-z_][A-Za-z0-9_-]*$') { throw "VpsUser has an invalid format." }
 
-    foreach ($command in @("ssh", "scp")) {
+    foreach ($command in @("ssh", "scp", "curl.exe")) {
         if ($null -eq (Get-Command $command -ErrorAction SilentlyContinue)) {
             throw "Required command '$command' was not found in PATH."
         }
@@ -138,14 +161,21 @@ try {
     if (-not [int]::TryParse($currentVersionCodeText, [ref]$currentVersionCode) -or $currentVersionCode -le 0) {
         throw "The existing versionCode must be a positive integer."
     }
-    if ($currentVersionCode -eq [int]::MaxValue) {
-        throw "The existing versionCode cannot be incremented safely."
-    }
-    $newVersionCode = $currentVersionCode + 1
-    if ($newVersionCode -le $currentVersionCode) {
-        throw "New versionCode must be strictly greater than the current versionCode."
-    }
     $currentVersionName = $versionNameMatches[0].Groups["name"].Value
+    # Re-running the same version is a recovery operation after a partial release.
+    # Reuse the versionCode already persisted by the first attempt.
+    $isResume = $currentVersionName -eq $VersionName
+    if ($isResume) {
+        $newVersionCode = $currentVersionCode
+    } else {
+        if ($currentVersionCode -eq [int]::MaxValue) {
+            throw "The existing versionCode cannot be incremented safely."
+        }
+        $newVersionCode = $currentVersionCode + 1
+        if ($newVersionCode -le $currentVersionCode) {
+            throw "New versionCode must be strictly greater than the current versionCode."
+        }
+    }
 
     $apkName = "myvpn-$VersionName.apk"
     $sourceApk = Join-Path $androidRoot "app/build/outputs/apk/release/app-release.apk"
@@ -153,6 +183,7 @@ try {
     $releaseApk = Join-Path $releaseDirectory $apkName
     $versionedApkUrl = "$PublicBaseUrl/downloads/$apkName"
     $remote = "$VpsUser@$VpsHost"
+    $recoveryCommand = ".\scripts\publish-android-release.ps1 -VersionName `"$VersionName`" -VpsHost `"$VpsHost`" -VpsUser `"$VpsUser`""
 
     if ($DryRun) {
         Write-Output "Dry run: no files, Gradle configuration, APKs, or VPS state will be changed."
@@ -160,16 +191,36 @@ try {
         Write-Output "New version code: $newVersionCode"
         Write-Output "Current version name: $currentVersionName"
         Write-Output "New version name: $VersionName"
-        Write-Output "Would set versionCode = $newVersionCode and versionName = `"$VersionName`" in android/app/build.gradle.kts."
-        Write-Output "Would build $sourceApk and copy it to $releaseApk."
-        Write-Output "Would upload $apkName to /var/www/myvpn/downloads/ on $remote."
-        Write-Output "Would point myvpn-latest.apk to $apkName and set Android staging metadata to the stable latest URL."
+        if ($isResume) { Write-Output "Mode: resume existing version without another versionCode increment." }
+        Write-Stage 1 "Version update"
+        Write-Output ("Would persist versionCode = {0} and versionName = {1} in android/app/build.gradle.kts." -f $newVersionCode, $VersionName)
+        Write-Stage 2 "Build"
+        Write-Output "Would run in android: .\gradlew.bat --no-daemon clean assembleRelease"
+        Write-Output ("Would copy {0} to {1}." -f $sourceApk, $releaseApk)
+        Write-Stage 3 "Upload"
+        Write-Output ("scp {0} {1}:{2}/{3}" -f $releaseApk, $remote, $RemoteDownloadsDirectory, $apkName)
+        Write-Stage 4 "Symlink"
+        Write-Output ("ssh {0}: cd {1}; test APK; ln -sfn {2} myvpn-latest.apk; readlink -f myvpn-latest.apk" -f $remote, $RemoteDownloadsDirectory, $apkName)
+        Write-Stage 5 "Metadata"
+        Write-Output ("ssh {0}: cd {1}; atomically update only ANDROID_LATEST_VERSION_CODE={2}, ANDROID_LATEST_VERSION_NAME={3}, ANDROID_APK_URL={4} in .env.staging" -f $remote, $RemoteProjectDirectory, $newVersionCode, $VersionName, $LatestApkUrl)
+        Write-Stage 6 "Backend recreate"
+        Write-Output ("ssh {0}: cd {1}; docker compose -f compose.server.yaml --env-file .env.staging config --quiet; docker compose -f compose.server.yaml --env-file .env.staging up -d --force-recreate app" -f $remote, $RemoteProjectDirectory)
+        Write-Stage 7 "Validation"
+        Write-Output ("ssh {0}: readlink -f {1}/myvpn-latest.apk" -f $remote, $RemoteDownloadsDirectory)
+        Write-Output "curl -fsS $PublicBaseUrl/actuator/health"
+        Write-Output "curl -fsS $PublicBaseUrl/api/v1/app/version"
         exit 0
     }
 
-    $updatedGradleContent = [regex]::Replace($gradleContent, $versionCodePattern, "        versionCode = $newVersionCode")
-    $updatedGradleContent = [regex]::Replace($updatedGradleContent, $versionNamePattern, "        versionName = `"$VersionName`"")
-    Set-Content -LiteralPath $gradleFile -Value $updatedGradleContent -NoNewline -Encoding utf8
+    Write-Stage 1 "Version update"
+    $currentStage = "[1/7] Version update"
+    if (-not $isResume) {
+        $updatedGradleContent = [regex]::Replace($gradleContent, $versionCodePattern, "        versionCode = $newVersionCode")
+        $updatedGradleContent = [regex]::Replace($updatedGradleContent, $versionNamePattern, "        versionName = `"$VersionName`"")
+        Set-Content -LiteralPath $gradleFile -Value $updatedGradleContent -NoNewline -Encoding utf8
+    } else {
+        Write-Output "Resuming version $VersionName with existing versionCode $newVersionCode."
+    }
 
     $persistedGradleContent = Get-Content -LiteralPath $gradleFile -Raw
     $persistedVersionCodeMatches = [regex]::Matches($persistedGradleContent, $versionCodePattern)
@@ -184,7 +235,10 @@ try {
     if (-not $persistedCodeIsExpected -or $persistedVersionName -ne $VersionName) {
         throw "Version update was not persisted with the requested versionCode and versionName."
     }
+    $versionPersisted = $true
 
+    Write-Stage 2 "Build"
+    $currentStage = "[2/7] Build"
     Set-Location -LiteralPath $androidRoot
     & .\gradlew.bat --no-daemon clean assembleRelease
     Assert-NativeSuccess "Android release build"
@@ -195,22 +249,28 @@ try {
     New-Item -ItemType Directory -Path $releaseDirectory -Force | Out-Null
     Copy-Item -LiteralPath $sourceApk -Destination $releaseApk -Force
 
-    & scp $releaseApk "${remote}:/var/www/myvpn/downloads/$apkName"
+    Write-Stage 3 "Upload"
+    $currentStage = "[3/7] Upload"
+    & scp $releaseApk "${remote}:$RemoteDownloadsDirectory/$apkName"
     Assert-NativeSuccess "APK upload"
-    Invoke-Remote $remote "test -s '/var/www/myvpn/downloads/$apkName'" "Remote APK existence check"
-    Invoke-Remote $remote "cd /var/www/myvpn/downloads && ln -sfn '$apkName' myvpn-latest.apk" "Latest symlink update"
-    Invoke-Remote $remote "test `"`$(readlink -f /var/www/myvpn/downloads/myvpn-latest.apk)`" = '/var/www/myvpn/downloads/$apkName'" "Latest symlink validation"
+    $remoteApkUploaded = $true
 
-    Assert-ApkHttpResponse $versionedApkUrl
-    Assert-ApkHttpResponse $LatestApkUrl
+    Write-Stage 4 "Symlink"
+    $currentStage = "[4/7] Symlink"
+    Invoke-Remote $remote "cd '$RemoteDownloadsDirectory' && test -s '$apkName' && ln -sfn '$apkName' myvpn-latest.apk" "Latest symlink update"
+    Invoke-Remote $remote "test `"`$(readlink -f '$RemoteDownloadsDirectory/myvpn-latest.apk')`" = '$RemoteDownloadsDirectory/$apkName'" "Latest symlink validation"
+    $latestSymlinkSwitched = $true
 
+    Write-Stage 5 "Metadata"
+    $currentStage = "[5/7] Metadata"
     $safeRemoteArguments = "'$newVersionCode' '$VersionName' '$LatestApkUrl'"
     $environmentUpdateScript = @'
 set -eu
 version_code="$1"
 version_name="$2"
 apk_url="$3"
-env_file="/opt/myvpn/myvpn/.env.staging"
+cd /opt/myvpn/myvpn
+env_file=".env.staging"
 test -f "$env_file"
 temp_file="$(mktemp "${env_file}.tmp.XXXXXX")"
 trap 'rm -f "$temp_file"' EXIT
@@ -227,19 +287,37 @@ awk -v code="$version_code" -v name="$version_name" -v url="$apk_url" '
 ' "$env_file" > "$temp_file"
 chmod --reference="$env_file" "$temp_file"
 mv "$temp_file" "$env_file"
+trap - EXIT
+grep -Fqx "ANDROID_LATEST_VERSION_CODE=$version_code" "$env_file"
+grep -Fqx "ANDROID_LATEST_VERSION_NAME=$version_name" "$env_file"
+grep -Fqx "ANDROID_APK_URL=$apk_url" "$env_file"
 '@
     Invoke-RemoteScript $remote $environmentUpdateScript $safeRemoteArguments "Staging metadata update"
 
+    Write-Stage 6 "Backend recreate"
+    $currentStage = "[6/7] Backend recreate"
     $recreateScript = @'
-set -eu
+set -euo pipefail
 cd /opt/myvpn/myvpn
+test -f compose.server.yaml
+test -f .env.staging
 docker compose -f compose.server.yaml --env-file .env.staging config --quiet
+rendered_config="$(docker compose -f compose.server.yaml --env-file .env.staging config)"
+grep -q 'ANDROID_LATEST_VERSION_CODE:' <<< "$rendered_config"
+grep -q 'ANDROID_LATEST_VERSION_NAME:' <<< "$rendered_config"
+grep -q 'ANDROID_APK_URL:' <<< "$rendered_config"
+docker compose -f compose.server.yaml --env-file .env.staging config --services | grep -Fx app >/dev/null
 docker compose -f compose.server.yaml --env-file .env.staging up -d --force-recreate app
 '@
     Invoke-RemoteScript $remote $recreateScript "" "Staging app recreate"
 
+    Write-Stage 7 "Validation"
+    $currentStage = "[7/7] Validation"
+    Invoke-Remote $remote "test `"`$(readlink -f '$RemoteDownloadsDirectory/myvpn-latest.apk')`" = '$RemoteDownloadsDirectory/$apkName'" "Final latest symlink validation"
+    Assert-ApkHttpResponse $versionedApkUrl
+    Assert-ApkHttpResponse $LatestApkUrl
     Wait-ForHealth "$PublicBaseUrl/actuator/health"
-    $metadata = Invoke-RestMethod -Uri "$PublicBaseUrl/api/v1/app/version" -Method Get
+    $metadata = Invoke-CurlJson "$PublicBaseUrl/api/v1/app/version" "App-version metadata request"
     if ($metadata.latestVersionCode -ne $newVersionCode -or $metadata.latestVersionName -ne $VersionName -or $metadata.apkUrl -ne $LatestApkUrl) {
         throw "Staging app-version metadata does not match the published Android release."
     }
@@ -253,7 +331,18 @@ docker compose -f compose.server.yaml --env-file .env.staging up -d --force-recr
     Write-Output "Health: UP"
 }
 catch {
-    [Console]::Error.WriteLine("Error: $($_.Exception.Message)")
+    [Console]::Error.WriteLine("Release failed at ${currentStage}: $($_.Exception.Message)")
+    if ($versionPersisted) {
+        [Console]::Error.WriteLine("The local Gradle version remains versionCode=$newVersionCode, versionName=$VersionName.")
+        [Console]::Error.WriteLine("Recovery command (the same VersionName reuses this versionCode):")
+        [Console]::Error.WriteLine($recoveryCommand)
+    }
+    if ($remoteApkUploaded) {
+        [Console]::Error.WriteLine("Partial release: the versioned APK was uploaded to $RemoteDownloadsDirectory/$apkName.")
+    }
+    if ($latestSymlinkSwitched) {
+        [Console]::Error.WriteLine("Partial release: myvpn-latest.apk already points to $apkName; backend metadata may still require recovery.")
+    }
     $exitCode = 1
 }
 finally {
