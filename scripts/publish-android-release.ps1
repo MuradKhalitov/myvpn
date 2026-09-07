@@ -184,6 +184,12 @@ try {
     $versionedApkUrl = "$PublicBaseUrl/downloads/$apkName"
     $remote = "$VpsUser@$VpsHost"
     $recoveryCommand = ".\scripts\publish-android-release.ps1 -VersionName `"$VersionName`" -VpsHost `"$VpsHost`" -VpsUser `"$VpsUser`""
+    $backendRecreateRemoteCommand = @(
+        "cd $RemoteProjectDirectory"
+        "docker compose -f compose.server.yaml --env-file .env.staging config --quiet"
+        "docker compose -f compose.server.yaml --env-file .env.staging config --services | grep -qx app"
+        "docker compose -f compose.server.yaml --env-file .env.staging up -d --force-recreate app"
+    ) -join " && "
 
     if ($DryRun) {
         Write-Output "Dry run: no files, Gradle configuration, APKs, or VPS state will be changed."
@@ -204,7 +210,8 @@ try {
         Write-Stage 5 "Metadata"
         Write-Output ("ssh {0}: cd {1}; atomically update only ANDROID_LATEST_VERSION_CODE={2}, ANDROID_LATEST_VERSION_NAME={3}, ANDROID_APK_URL={4} in .env.staging" -f $remote, $RemoteProjectDirectory, $newVersionCode, $VersionName, $LatestApkUrl)
         Write-Stage 6 "Backend recreate"
-        Write-Output ("ssh {0}: cd {1}; docker compose -f compose.server.yaml --env-file .env.staging config --quiet; docker compose -f compose.server.yaml --env-file .env.staging up -d --force-recreate app" -f $remote, $RemoteProjectDirectory)
+        Write-Output "Remote command: $backendRecreateRemoteCommand"
+        Write-Output "SSH invocation: ssh $remote <single remote command shown above>"
         Write-Stage 7 "Validation"
         Write-Output ("ssh {0}: readlink -f {1}/myvpn-latest.apk" -f $remote, $RemoteDownloadsDirectory)
         Write-Output "curl -fsS $PublicBaseUrl/actuator/health"
@@ -296,20 +303,8 @@ grep -Fqx "ANDROID_APK_URL=$apk_url" "$env_file"
 
     Write-Stage 6 "Backend recreate"
     $currentStage = "[6/7] Backend recreate"
-    $recreateScript = @'
-set -euo pipefail
-cd /opt/myvpn/myvpn
-test -f compose.server.yaml
-test -f .env.staging
-docker compose -f compose.server.yaml --env-file .env.staging config --quiet
-rendered_config="$(docker compose -f compose.server.yaml --env-file .env.staging config)"
-grep -q 'ANDROID_LATEST_VERSION_CODE:' <<< "$rendered_config"
-grep -q 'ANDROID_LATEST_VERSION_NAME:' <<< "$rendered_config"
-grep -q 'ANDROID_APK_URL:' <<< "$rendered_config"
-docker compose -f compose.server.yaml --env-file .env.staging config --services | grep -Fx app >/dev/null
-docker compose -f compose.server.yaml --env-file .env.staging up -d --force-recreate app
-'@
-    Invoke-RemoteScript $remote $recreateScript "" "Staging app recreate"
+    Write-Output "Remote command: $backendRecreateRemoteCommand"
+    Invoke-Remote $remote $backendRecreateRemoteCommand "Staging app recreate"
 
     Write-Stage 7 "Validation"
     $currentStage = "[7/7] Validation"
