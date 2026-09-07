@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: 009-persistent-auth-session
+      author: myvpn
+      changes:
+        - sql:
+            splitStatements: false
+            sql: |
+              ALTER TABLE auth_sessions ALTER COLUMN expires_at DROP NOT NULL;
+              UPDATE auth_sessions SET expires_at = NULL;
+              ALTER TABLE auth_sessions ADD COLUMN previous_refresh_token_hash varchar(64);
+              ALTER TABLE auth_sessions ADD COLUMN previous_refresh_valid_until timestamptz;
+              CREATE UNIQUE INDEX uk_auth_sessions_previous_refresh_hash
+                ON auth_sessions(previous_refresh_token_hash)
+                WHERE previous_refresh_token_hash IS NOT NULL;

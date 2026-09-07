@@ -80,6 +80,7 @@ class MainViewModel(
 
     fun restoreAuth() {
         pollingJob?.cancel(); vpnJob?.cancel()
+        safeAuthLog("Startup auth restore requested")
         viewModelScope.launch {
             val restored = try {
                 auth.restoreSession()
@@ -91,8 +92,10 @@ class MainViewModel(
                 return@launch
             }
             if (restored == null) {
+                safeAuthLog("Auth restore result=NO_LOCAL_OR_CONFIRMED_INVALID_SESSION")
                 _state.value = MainUiState.PhoneEntry()
             } else {
+                safeAuthLog("Auth restore result=AUTHENTICATED")
                 session = restored
                 _state.value = MainUiState.Authenticated
                 loadVpn()
@@ -186,6 +189,7 @@ class MainViewModel(
     }
 
     fun retry() {
+        safeAuthLog("Retry triggered: state=${_state.value::class.java.simpleName}")
         when (val current = _state.value) {
             is MainUiState.PhoneEntry -> _state.value = MainUiState.PhoneEntry()
             is MainUiState.PhoneVerification -> onReturnedFromDialer()
@@ -255,7 +259,14 @@ class MainViewModel(
     }
     private fun errorFor(error: Throwable, fallback: AppError): MainUiState.Error = when (error) {
         is IOException -> MainUiState.Error(AppError.NETWORK_UNAVAILABLE, "Нет подключения к сети", true)
-        is HttpException -> MainUiState.Error(if (error.code() >= 500) AppError.BACKEND_UNAVAILABLE else fallback, if (error.code() >= 500) "Сервис временно недоступен" else "Не удалось выполнить запрос", true)
+        is HttpException -> MainUiState.Error(
+            if (error.code() == 408 || error.code() == 429 || error.code() >= 500) AppError.BACKEND_UNAVAILABLE else fallback,
+            if (error.code() == 408 || error.code() == 429 || error.code() >= 500) "Сервис временно недоступен" else "Не удалось выполнить запрос",
+            true)
         else -> MainUiState.Error(fallback, when (fallback) { AppError.EXCHANGE_FAILED -> "Не удалось завершить вход"; AppError.VPN_PROVISIONING_FAILED -> "Не удалось настроить VPN"; else -> "Сервис временно недоступен" }, true)
+    }
+
+    private fun safeAuthLog(message: String) {
+        runCatching { android.util.Log.i("MyVpnAuth", message) }
     }
 }

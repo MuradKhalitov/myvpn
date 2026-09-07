@@ -68,7 +68,6 @@ public class DeviceRegistrationService {
                 .refreshTokenHash(refreshTokenHashService.hash(refreshToken))
                 .tokenFamilyId(UUID.randomUUID())
                 .rotationCounter(0)
-                .expiresAt(now.plus(properties.refresh().ttl()))
                 .createdAt(now)
                 .build());
         return new DeviceRegistrationResult(

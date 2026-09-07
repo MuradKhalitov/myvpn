@@ -13,6 +13,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class VpnQuota(val limitBytes: Long, val periodStartedAt: String? = null, val periodEndsAt: String? = null)
 @Serializable data class VpnAccessResponse(val status: String, val entitlement: String, val configuration: String? = null, val quota: VpnQuota? = null, val premiumExpiresAt: String? = null)
 @Serializable data class AppVersionResponse(val latestVersionCode: Long, val latestVersionName: String, val minimumSupportedVersionCode: Long, val apkUrl: String, val changelog: String)
+@Serializable data class AuthErrorResponse(val code: String? = null, val message: String? = null)
 
 data class Session(
     val accessToken: String,
@@ -27,6 +28,9 @@ data class Session(
 }
 
 class SessionExpiredException : IllegalStateException()
+class CorruptedLocalCredentialException(cause: Throwable) : IllegalStateException(cause)
+
+enum class SessionClearReason { INVALID_REFRESH, REVOKED_SESSION, CORRUPTED_LOCAL_CREDENTIAL }
 
 /** A transient refresh failure. The encrypted session must be retained for retry. */
 class SessionRefreshUnavailableException(cause: Throwable) : IllegalStateException(cause)

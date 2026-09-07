@@ -29,11 +29,11 @@ class AuthSessionRepositoryIntegrationTest extends AuthIntegrationTestSupport {
                 .account(account)
                 .refreshTokenHash("a".repeat(64))
                 .tokenFamilyId(UUID.randomUUID())
-                .expiresAt(now.plusSeconds(3600))
                 .createdAt(now)
                 .build());
 
         assertThat(sessionRepository.findByRefreshTokenHashForUpdate("a".repeat(64)))
                 .contains(session);
+        assertThat(session.getExpiresAt()).isNull();
     }
 }

@@ -72,7 +72,6 @@ public class EmailOtpVerifyService {
                 .refreshTokenHash(refreshHmac.hash(refreshToken))
                 .tokenFamilyId(UUID.randomUUID())
                 .rotationCounter(0)
-                .expiresAt(now.plus(properties.refresh().ttl()))
                 .createdAt(now)
                 .build());
         String accessToken = jwtTokenService.issue(account.getId(), session.getId());

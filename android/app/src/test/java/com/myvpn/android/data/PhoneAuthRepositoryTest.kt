@@ -29,12 +29,41 @@ class PhoneAuthRepositoryTest {
         assertEquals("new-refresh", store.value?.refreshToken)
     }
 
-    @Test fun revokedRefreshClearsSessionAndReturnsNoSession() = runTest {
+    @Test fun explicitlyRevokedRefreshClearsSessionAndReturnsNoSession() = runTest {
         val store = FakeStore(expiredSession())
-        val api = FakeApi(refreshFailure = unauthorized())
+        val api = FakeApi(refreshFailure = unauthorized("SESSION_REVOKED"))
 
         assertNull(PhoneAuthRepository(api, store).restoreSession())
         assertTrue(store.cleared)
+        assertEquals(SessionClearReason.REVOKED_SESSION, store.clearReason)
+    }
+
+    @Test fun explicitlyInvalidRefreshClearsSession() = runTest {
+        val store = FakeStore(expiredSession())
+
+        assertNull(PhoneAuthRepository(FakeApi(refreshFailure = unauthorized("REFRESH_TOKEN_INVALID")), store).restoreSession())
+
+        assertEquals(SessionClearReason.INVALID_REFRESH, store.clearReason)
+    }
+
+    @Test fun genericUnauthorizedFromRefreshDoesNotProveInvalidSession() = runTest {
+        val store = FakeStore(expiredSession())
+        val api = FakeApi(refreshFailure = unauthorized("INVALID_AUTHENTICATION"))
+
+        val failure = runCatching { PhoneAuthRepository(api, store).restoreSession() }.exceptionOrNull()
+
+        assertTrue(failure is SessionRefreshUnavailableException)
+        assertTrue(!store.cleared)
+        assertSame(store.initial, store.value)
+    }
+
+    @Test fun missingAccessWithPersistedRefreshRestoresWithoutPhoneEntry() = runTest {
+        val store = FakeStore(Session("", "old-refresh", 0, "account", expiresAtMillis = 0))
+
+        val restored = PhoneAuthRepository(FakeApi(), store).restoreSession()
+
+        assertEquals("new-access", restored?.accessToken)
+        assertEquals(1, store.saveCalls)
     }
 
     @Test fun transientRefreshFailureKeepsEncryptedSessionForRetry() = runTest {
@@ -45,6 +74,54 @@ class PhoneAuthRepositoryTest {
 
         assertTrue(failure is SessionRefreshUnavailableException)
         assertSame(store.initial, store.value)
+        assertTrue(!store.cleared)
+    }
+
+    @Test fun dnsFailureKeepsSessionForRetry() = runTest {
+        val store = FakeStore(expiredSession())
+
+        val failure = runCatching {
+            PhoneAuthRepository(FakeApi(refreshFailure = java.net.UnknownHostException("dns")), store).restoreSession()
+        }.exceptionOrNull()
+
+        assertTrue(failure is SessionRefreshUnavailableException)
+        assertTrue(!store.cleared)
+    }
+
+    @Test fun http500And429KeepSessionForRetry() = runTest {
+        for (status in listOf(500, 429)) {
+            val store = FakeStore(expiredSession())
+            val failure = runCatching {
+                PhoneAuthRepository(FakeApi(refreshFailure = http(status)), store).restoreSession()
+            }.exceptionOrNull()
+            assertTrue(failure is SessionRefreshUnavailableException)
+            assertTrue(!store.cleared)
+            assertSame(store.initial, store.value)
+        }
+    }
+
+    @Test fun retryAfterLostRotationResponsePersistsRecoveredCredentials() = runTest {
+        val store = FakeStore(expiredSession())
+        val api = FakeApi(refreshFailures = ArrayDeque(listOf(java.net.SocketTimeoutException("lost response"))))
+        val repository = PhoneAuthRepository(api, store)
+
+        assertTrue(runCatching { repository.restoreSession() }.exceptionOrNull() is SessionRefreshUnavailableException)
+        val recovered = repository.restoreSession()
+
+        assertEquals("new-refresh", recovered?.refreshToken)
+        assertEquals(2, api.refreshCalls)
+        assertEquals("new-refresh", store.value?.refreshToken)
+        assertTrue(!store.cleared)
+    }
+
+    @Test fun processRestartUsesPersistedRotatedRefresh() = runTest {
+        val store = FakeStore(expiredSession())
+        PhoneAuthRepository(FakeApi(), store).restoreSession()
+        store.value = store.value?.copy(accessToken = "", expiresAtMillis = 0)
+
+        val restoredAfterProcessDeath = PhoneAuthRepository(FakeApi(), store).restoreSession()
+
+        assertEquals("new-access", restoredAfterProcessDeath?.accessToken)
         assertTrue(!store.cleared)
     }
 
@@ -68,19 +145,23 @@ class PhoneAuthRepositoryTest {
 
     private fun expiredSession() = Session("old-access", "old-refresh", 0, "account", expiresAtMillis = 0)
     private fun validSession(access: String, refresh: String) = Session(access, refresh, 3_600, "account")
-    private fun unauthorized() = HttpException(Response.error<AuthResponse>(401, "{}".toResponseBody("application/json".toMediaType())))
+    private fun unauthorized(code: String) = HttpException(Response.error<AuthResponse>(401, "{\"code\":\"$code\"}".toResponseBody("application/json".toMediaType())))
+    private fun http(status: Int) = HttpException(Response.error<AuthResponse>(status, "{}".toResponseBody("application/json".toMediaType())))
 
     private class FakeStore(initialValue: Session?) : SessionStore {
         val initial = initialValue
         var value = initialValue
         var cleared = false
+        var clearReason: SessionClearReason? = null
+        var saveCalls = 0
         override suspend fun session() = value
-        override suspend fun save(session: Session) { value = session }
-        override suspend fun clear() { cleared = true; value = null }
+        override suspend fun save(session: Session) { saveCalls++; value = session }
+        override suspend fun clear(reason: SessionClearReason) { cleared = true; clearReason = reason; value = null }
     }
 
     private class FakeApi(
         private val refreshFailure: Throwable? = null,
+        private val refreshFailures: ArrayDeque<Throwable> = ArrayDeque(),
         private val refreshDelayMillis: Long = 0,
         private val rejectAccessToken: String? = null
     ) : MyVpnApi {
@@ -89,6 +170,7 @@ class PhoneAuthRepositoryTest {
         override suspend fun register(request: DeviceRegisterRequest) = auth()
         override suspend fun refresh(request: RefreshRequest): AuthResponse {
             refreshCalls++
+            if (refreshFailures.isNotEmpty()) throw refreshFailures.removeFirst()
             refreshFailure?.let { throw it }
             if (refreshDelayMillis > 0) delay(refreshDelayMillis)
             return auth()

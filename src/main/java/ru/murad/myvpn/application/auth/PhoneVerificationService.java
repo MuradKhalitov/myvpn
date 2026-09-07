@@ -85,7 +85,7 @@ public class PhoneVerificationService {
         Account account = accounts.findById(verification.getAccountId()).orElseThrow(InvalidAuthenticationException::new);
         String refresh = tokens.generate(); AuthSession session = sessions.save(AuthSession.builder().id(UUID.randomUUID()).account(account)
                 .refreshTokenHash(refreshHash.hash(refresh)).tokenFamilyId(UUID.randomUUID()).rotationCounter(0)
-                .expiresAt(now.plus(auth.refresh().ttl())).createdAt(now).build());
+                .createdAt(now).build());
         var premium = subscriptions.findFirstByAccountIdAndStatusAndExpiresAtAfterOrderByExpiresAtDesc(
                 account.getId(), SubscriptionStatus.ACTIVE, now).orElse(null);
         boolean trial = account.hasActiveTrialAt(now);

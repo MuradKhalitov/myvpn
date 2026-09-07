@@ -5,11 +5,13 @@ import com.myvpn.android.data.PhoneVerificationStartResponse
 import com.myvpn.android.data.PhoneVerificationStatusResponse
 import com.myvpn.android.data.Session
 import com.myvpn.android.data.SessionExpiredException
+import com.myvpn.android.data.SessionRefreshUnavailableException
 import com.myvpn.android.data.VpnAccessResponse
 import com.myvpn.android.data.VpnAccessSource
 import com.myvpn.android.vpn.VpnConnectionState
 import com.myvpn.android.vpn.VpnEngine
 import java.time.Instant
+import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,11 +64,26 @@ class MainViewModelTest {
         assertEquals("PREMIUM", (vm.state.value as MainUiState.Ready).access.entitlement)
     }
 
-    @Test fun expiredAccessWithFailedRefreshReturnsPhoneEntry() = runTest {
+    @Test fun confirmedInvalidRefreshReturnsPhoneEntry() = runTest {
         val auth = FakeAuth(restored = null)
         val vm = viewModel(auth, FakeAccess())
         advanceUntilIdle()
         assertTrue(vm.state.value is MainUiState.PhoneEntry)
+    }
+
+    @Test fun retryAfterTransientRefreshFailureRestoresWithoutPhoneEntry() = runTest {
+        val auth = FakeAuth(
+            restored = session(),
+            restoreFailures = mutableListOf(SessionRefreshUnavailableException(IOException("offline"))))
+        val vm = viewModel(auth, FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)))
+        advanceUntilIdle()
+        assertEquals(AppError.NETWORK_UNAVAILABLE, (vm.state.value as MainUiState.Error).type)
+
+        vm.retry()
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value is MainUiState.Ready)
+        assertEquals(2, auth.restoreCalls)
     }
 
     @Test fun startPhoneVerificationValidatesAndStarts() = runTest {
@@ -228,11 +245,12 @@ class MainViewModelTest {
         private val restored: Session?,
         private val statuses: MutableList<PhoneVerificationStatusResponse> = mutableListOf(),
         private val started: PhoneVerificationStartResponse = PhoneVerificationStartResponse("verification", "+79991234567", "+7 999 123-45-67", "2026-09-10T00:00:00Z"),
-        private val startFailure: Throwable? = null
+        private val startFailure: Throwable? = null,
+        private val restoreFailures: MutableList<Throwable> = mutableListOf()
     ) : PhoneAuthSource {
-        var starts = 0; var statusCalls = 0; var exchanges = 0; var savedSessions = 0; var deviceRegistrationCalls = 0
+        var starts = 0; var statusCalls = 0; var exchanges = 0; var savedSessions = 0; var deviceRegistrationCalls = 0; var restoreCalls = 0
         val startedPhones = mutableListOf<String>()
-        override suspend fun restoreSession() = restored
+        override suspend fun restoreSession(): Session? { restoreCalls++; if (restoreFailures.isNotEmpty()) throw restoreFailures.removeAt(0); return restored }
         override suspend fun startVerification(phone: String): PhoneVerificationStartResponse { starts++; startedPhones += phone; startFailure?.let { throw it }; return started }
         override suspend fun verificationStatus(verificationId: String): PhoneVerificationStatusResponse { statusCalls++; return statuses.removeFirstOrNull() ?: PhoneVerificationStatusResponse("PENDING") }
         override suspend fun exchange(verificationId: String, exchangeToken: String): Session { exchanges++; savedSessions++; return Session("access", "refresh", 3600, "account", "TRIAL", "2026-09-10T00:00:00Z") }

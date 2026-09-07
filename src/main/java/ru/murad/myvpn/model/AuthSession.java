@@ -15,7 +15,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
-import java.time.Duration;
 import java.util.UUID;
 
 @Entity
@@ -36,13 +35,19 @@ public class AuthSession {
     @Column(name = "refresh_token_hash", nullable = false, length = 64)
     private String refreshTokenHash;
 
+    @Column(name = "previous_refresh_token_hash", length = 64)
+    private String previousRefreshTokenHash;
+
+    @Column(name = "previous_refresh_valid_until")
+    private Instant previousRefreshValidUntil;
+
     @Column(name = "token_family_id", nullable = false)
     private UUID tokenFamilyId;
 
     @Column(name = "rotation_counter", nullable = false)
     private long rotationCounter;
 
-    @Column(name = "expires_at", nullable = false)
+    @Column(name = "expires_at")
     private Instant expiresAt;
 
     @Column(name = "last_used_at")
@@ -58,20 +63,23 @@ public class AuthSession {
     @Column(nullable = false)
     private long version;
 
-    public boolean isUsableAt(Instant now) {
-        return revokedAt == null && now.isBefore(expiresAt);
+    public boolean isUsable() {
+        return revokedAt == null;
     }
 
-    /**
-     * Refresh sessions use a sliding inactivity window.  A successful rotation
-     * is proof that the holder still has the current credential, so extend the
-     * server-side session without making the access JWT long-lived.
-     */
-    public void rotate(String newRefreshTokenHash, Instant now, Duration inactivityTtl) {
+    /** Keeps only a bounded previous-token recovery window; session life is revoke-only. */
+    public void rotate(String newRefreshTokenHash, Instant now, Instant previousValidUntil) {
+        previousRefreshTokenHash = refreshTokenHash;
+        previousRefreshValidUntil = previousValidUntil;
         refreshTokenHash = newRefreshTokenHash;
         rotationCounter++;
         lastUsedAt = now;
-        expiresAt = now.plus(inactivityTtl);
+        expiresAt = null;
+    }
+
+    public boolean canRecoverPreviousAt(Instant now) {
+        return revokedAt == null && previousRefreshValidUntil != null
+                && !now.isAfter(previousRefreshValidUntil);
     }
 
     public void revoke(Instant now) {

@@ -164,8 +164,8 @@ public class AuthConfiguration {
                 || properties.otp().maxAttempts() < 1
                 || properties.jwt().accessTtl().isNegative()
                 || properties.jwt().accessTtl().isZero()
-                || properties.refresh().ttl().isNegative()
-                || properties.refresh().ttl().isZero()) {
+                || properties.refresh().recoveryGrace().isNegative()
+                || properties.refresh().recoveryGrace().isZero()) {
             throw new IllegalStateException("Auth durations and max attempts must be positive");
         }
     }

@@ -18,6 +18,11 @@ public interface AuthSessionRepository extends JpaRepository<AuthSession, UUID> 
             @Param("refreshTokenHash") String refreshTokenHash);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select session from AuthSession session where session.previousRefreshTokenHash = :refreshTokenHash")
+    Optional<AuthSession> findByPreviousRefreshTokenHashForUpdate(
+            @Param("refreshTokenHash") String refreshTokenHash);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select session from AuthSession session where session.id = :id")
     Optional<AuthSession> findByIdForUpdate(@Param("id") UUID id);
 }

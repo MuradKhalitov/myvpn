@@ -1,11 +1,13 @@
 package ru.murad.myvpn.application.auth;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.murad.myvpn.config.AuthProperties;
 import ru.murad.myvpn.model.AccountStatus;
+import ru.murad.myvpn.model.AuthSession;
 import ru.murad.myvpn.repository.AuthSessionRepository;
 
 import java.time.Clock;
@@ -14,11 +16,11 @@ import java.time.Instant;
 @Service
 @ConditionalOnProperty(name = "auth.enabled", havingValue = "true")
 @RequiredArgsConstructor
+@Slf4j
 public class RefreshTokenService {
 
     private final AuthSessionRepository sessionRepository;
     private final RefreshTokenHashService refreshHmac;
-    private final RefreshTokenGenerator refreshTokenGenerator;
     private final JwtTokenService jwtTokenService;
     private final AuthProperties properties;
     private final Clock clock;
@@ -26,22 +28,48 @@ public class RefreshTokenService {
     @Transactional
     public AuthTokens refresh(String refreshToken) {
         if (refreshToken == null || refreshToken.isBlank()) {
-            throw new InvalidAuthenticationException();
+            throw invalid();
         }
         String hash = refreshHmac.hash(refreshToken);
-        var session = sessionRepository.findByRefreshTokenHashForUpdate(hash)
-                .orElseThrow(InvalidAuthenticationException::new);
         Instant now = clock.instant();
-        if (!session.isUsableAt(now)
-                || session.getAccount().getStatus() != AccountStatus.ACTIVE) {
-            throw new InvalidAuthenticationException();
+        var current = sessionRepository.findByRefreshTokenHashForUpdate(hash);
+        if (current.isEmpty()) {
+            var previous = sessionRepository.findByPreviousRefreshTokenHashForUpdate(hash)
+                    .orElseThrow(this::invalid);
+            if (!previous.canRecoverPreviousAt(now)) {
+                log.info("Refresh rejected: reason=PREVIOUS_TOKEN_OUTSIDE_GRACE sessionId={}", previous.getId());
+                throw invalid();
+            }
+            validateSession(previous);
+            String recovered = refreshHmac.deriveRotatedToken(previous.getId(), previous.getRotationCounter());
+            log.info("Refresh recovered after lost response: sessionId={} rotation={}",
+                    previous.getId(), previous.getRotationCounter());
+            return tokens(previous, recovered);
         }
-
-        String nextRefreshToken = refreshTokenGenerator.generate();
-        session.rotate(refreshHmac.hash(nextRefreshToken), now, properties.refresh().ttl());
+        var session = current.get();
+        validateSession(session);
+        long nextCounter = Math.addExact(session.getRotationCounter(), 1L);
+        String nextRefreshToken = refreshHmac.deriveRotatedToken(session.getId(), nextCounter);
+        session.rotate(refreshHmac.hash(nextRefreshToken), now, now.plus(properties.refresh().recoveryGrace()));
         sessionRepository.flush();
+        log.info("Refresh rotated: sessionId={} rotation={}", session.getId(), session.getRotationCounter());
+        return tokens(session, nextRefreshToken);
+    }
+
+    private void validateSession(AuthSession session) {
+        if (session.getRevokedAt() != null || session.getAccount().getStatus() != AccountStatus.ACTIVE) {
+            log.info("Refresh rejected: reason=SESSION_REVOKED sessionId={}", session.getId());
+            throw new RefreshAuthenticationException(RefreshAuthenticationException.Reason.SESSION_REVOKED);
+        }
+    }
+
+    private AuthTokens tokens(AuthSession session, String refreshToken) {
         String accessToken = jwtTokenService.issue(
                 session.getAccount().getId(), session.getId());
-        return new AuthTokens(accessToken, nextRefreshToken, properties.jwt().accessTtl());
+        return new AuthTokens(accessToken, refreshToken, properties.jwt().accessTtl());
+    }
+
+    private RefreshAuthenticationException invalid() {
+        return new RefreshAuthenticationException(RefreshAuthenticationException.Reason.REFRESH_TOKEN_INVALID);
     }
 }

@@ -7,7 +7,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import ru.murad.myvpn.application.auth.InvalidAuthenticationException;
+import ru.murad.myvpn.application.auth.AuthTokens;
 import ru.murad.myvpn.application.auth.RefreshTokenService;
 import ru.murad.myvpn.support.AuthIntegrationTestSupport;
 
@@ -50,8 +50,9 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
         String nextRefresh = rotated.path("refreshToken").asText();
         assertThat(nextRefresh).isNotEqualTo(firstRefresh);
 
-        postJson("/api/v1/auth/refresh",
-                "{\"refreshToken\":\"" + firstRefresh + "\"}", 401);
+        JsonNode recovered = postJson("/api/v1/auth/refresh",
+                "{\"refreshToken\":\"" + firstRefresh + "\"}", 200);
+        assertThat(recovered.path("refreshToken").asText()).isEqualTo(nextRefresh);
 
         webTestClient.post().uri("/api/v1/auth/logout")
                 .header(HttpHeaders.AUTHORIZATION,
@@ -61,8 +62,13 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
         assertThat(sessionRepository.findAll()).singleElement()
                 .extracting(session -> session.getRevokedAt()).isNotNull();
 
-        postJson("/api/v1/auth/refresh",
+        JsonNode revoked = postJson("/api/v1/auth/refresh",
                 "{\"refreshToken\":\"" + nextRefresh + "\"}", 401);
+        assertThat(revoked.path("code").asText()).isEqualTo("SESSION_REVOKED");
+
+        JsonNode invalid = postJson("/api/v1/auth/refresh",
+                "{\"refreshToken\":\"unknown-refresh-token\"}", 401);
+        assertThat(invalid.path("code").asText()).isEqualTo("REFRESH_TOKEN_INVALID");
     }
 
     @Test
@@ -75,7 +81,7 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
     }
 
     @Test
-    void concurrentRefreshRotationAcceptsOnlyTheCurrentCredentialOnce() throws Exception {
+    void concurrentRefreshReturnsOneIdempotentRotationToBothCallers() throws Exception {
         webTestClient.post().uri("/api/v1/auth/otp/request")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("{\"email\":\"user@example.com\"}").exchange().expectStatus().isAccepted();
@@ -87,11 +93,11 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
-            List<Throwable> failures = List.of(
-                    CompletableFuture.supplyAsync(() -> refreshFailure(refresh), executor),
-                    CompletableFuture.supplyAsync(() -> refreshFailure(refresh), executor))
-                    .stream().map(CompletableFuture::join).filter(value -> value != null).toList();
-            assertThat(failures).hasSize(1).allMatch(InvalidAuthenticationException.class::isInstance);
+            List<String> rotatedTokens = List.of(
+                    CompletableFuture.supplyAsync(() -> refreshToken(refresh), executor),
+                    CompletableFuture.supplyAsync(() -> refreshToken(refresh), executor))
+                    .stream().map(CompletableFuture::join).toList();
+            assertThat(rotatedTokens).hasSize(2).allMatch(rotatedTokens.get(0)::equals);
         } finally {
             executor.shutdownNow();
         }
@@ -99,13 +105,9 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
                 .satisfies(session -> assertThat(session.getRotationCounter()).isEqualTo(1));
     }
 
-    private Throwable refreshFailure(String refresh) {
-        try {
-            refreshTokenService.refresh(refresh);
-            return null;
-        } catch (Throwable failure) {
-            return failure;
-        }
+    private String refreshToken(String refresh) {
+        AuthTokens tokens = refreshTokenService.refresh(refresh);
+        return tokens.getRefreshToken();
     }
 
     private JsonNode postJson(String uri, String body, int status) throws Exception {

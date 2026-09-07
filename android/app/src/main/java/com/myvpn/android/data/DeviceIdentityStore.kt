@@ -24,7 +24,7 @@ private val Context.ds by preferencesDataStore("myvpn_device")
 interface SessionStore {
     suspend fun session(): Session?
     suspend fun save(session: Session)
-    suspend fun clear()
+    suspend fun clear(reason: SessionClearReason)
 }
 
 class DeviceIdentityStore(private val context: Context) : SessionStore {
@@ -47,9 +47,20 @@ class DeviceIdentityStore(private val context: Context) : SessionStore {
 
     override suspend fun session(): Session? {
         val preferences = context.ds.data.first()
-        val encryptedAccess = preferences[access] ?: return null
         val encryptedRefresh = preferences[refresh] ?: return null
-        return Session(decrypt(encryptedAccess), decrypt(encryptedRefresh), 0, preferences[accountId], preferences[accessStatus], preferences[accessExpiresAt], preferences[expiresAt] ?: 0)
+        return try {
+            val refreshToken = decrypt(encryptedRefresh)
+            // Access is disposable: if only its ciphertext is damaged, the
+            // persistent refresh credential can still restore the session.
+            val accessToken = preferences[access]?.let { runCatching { decrypt(it) }.getOrDefault("") }.orEmpty()
+            Session(accessToken, refreshToken, 0,
+                preferences[accountId], preferences[accessStatus], preferences[accessExpiresAt],
+                preferences[expiresAt] ?: 0)
+        } catch (failure: RuntimeException) {
+            throw CorruptedLocalCredentialException(failure)
+        } catch (failure: java.security.GeneralSecurityException) {
+            throw CorruptedLocalCredentialException(failure)
+        }
     }
 
     override suspend fun save(session: Session) {
@@ -63,7 +74,8 @@ class DeviceIdentityStore(private val context: Context) : SessionStore {
         }
     }
 
-    override suspend fun clear() {
+    override suspend fun clear(reason: SessionClearReason) {
+        android.util.Log.i("MyVpnAuth", "Session cleared: reason=$reason")
         context.ds.edit { it.remove(access); it.remove(refresh); it.remove(accountId); it.remove(accessStatus); it.remove(accessExpiresAt); it.remove(expiresAt) }
     }
 
