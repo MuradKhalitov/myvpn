@@ -67,10 +67,10 @@ class MainViewModel(
         viewModelScope.launch {
             engine.state.collect { connection ->
                 when (connection) {
-                    VpnConnectionState.Connected -> ready?.let { current -> session?.let { _state.value = MainUiState.Connected(current, it) } }
+                    VpnConnectionState.Connected -> ready?.let(::renderVpnState)
                     VpnConnectionState.Connecting -> _state.value = MainUiState.Connecting
                     VpnConnectionState.Disconnecting -> _state.value = MainUiState.Disconnecting
-                    VpnConnectionState.Disconnected -> ready?.let { current -> session?.let { _state.value = MainUiState.Ready(current, it) } }
+                    VpnConnectionState.Disconnected -> ready?.let(::renderVpnState)
                     VpnConnectionState.PermissionDenied -> ready?.let { current -> session?.let { _state.value = MainUiState.Ready(current, it, "Разрешение VPN не предоставлено") } }
                     is VpnConnectionState.Failed -> ready?.let { current -> session?.let { _state.value = MainUiState.Ready(current, it, "Не удалось подключить VPN") } }
                 }
@@ -221,7 +221,7 @@ class MainViewModel(
                                 else {
                                     configuration = vpn.configuration
                                     ready = vpn
-                                    session?.let { _state.value = MainUiState.Ready(vpn, it) }
+                                    renderVpnState(vpn)
                                 }
                                 return@launch
                             }
@@ -232,17 +232,33 @@ class MainViewModel(
         }
     }
 
-    fun connect() { if (configuration != null) _state.value = MainUiState.AwaitingPermission }
+    fun connect() {
+        if (engine.state.value is VpnConnectionState.Connected
+            || engine.state.value is VpnConnectionState.Connecting) return
+        if (configuration != null) _state.value = MainUiState.AwaitingPermission
+    }
     fun onPermissionResult(granted: Boolean) {
         val currentConfiguration = configuration
         val currentReady = ready
         if (!granted) { if (currentReady != null && session != null) _state.value = MainUiState.Ready(currentReady, session!!, "Разрешение VPN не предоставлено"); return }
-        if (currentConfiguration != null) viewModelScope.launch {
+        if (currentConfiguration != null
+            && engine.state.value !is VpnConnectionState.Connected
+            && engine.state.value !is VpnConnectionState.Connecting) viewModelScope.launch {
             _state.value = MainUiState.Connecting
             runCatching { engine.start(currentConfiguration) }.onFailure { if (currentReady != null && session != null) _state.value = MainUiState.Ready(currentReady, session!!, "Не удалось подключить VPN") }
         }
     }
     fun disconnect() = viewModelScope.launch { _state.value = MainUiState.Disconnecting; engine.stop() }
+
+    private fun renderVpnState(access: VpnAccessResponse) {
+        val authenticated = session ?: return
+        _state.value = when (engine.state.value) {
+            VpnConnectionState.Connected -> MainUiState.Connected(access, authenticated)
+            VpnConnectionState.Connecting -> MainUiState.Connecting
+            VpnConnectionState.Disconnecting -> MainUiState.Disconnecting
+            else -> MainUiState.Ready(access, authenticated)
+        }
+    }
 
     override fun onCleared() { stopPhoneVerificationPolling(); vpnJob?.cancel(); super.onCleared() }
 

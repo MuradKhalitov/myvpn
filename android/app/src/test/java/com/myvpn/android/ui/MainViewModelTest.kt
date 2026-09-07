@@ -56,6 +56,78 @@ class MainViewModelTest {
         assertTrue(vm.state.value is MainUiState.Ready)
     }
 
+    @Test fun serviceAlreadyConnectedRestoresConnectedUiAfterViewModelInit() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+
+        val vm = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+
+        assertTrue(vm.state.value is MainUiState.Connected)
+    }
+
+    @Test fun inactiveMyVpnServiceRestoresDisconnectedUi() = runTest {
+        val vm = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), FakeEngine())
+        advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Ready)
+    }
+
+    @Test fun recreatedUiUsesConnectedStateOwnedBySurvivingService() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val first = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+        assertTrue(first.state.value is MainUiState.Connected)
+
+        val recreated = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+        assertTrue(recreated.state.value is MainUiState.Connected)
+    }
+
+    @Test fun connectIsIdempotentWhenServiceIsAlreadyConnected() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+
+        vm.connect()
+        vm.onPermissionResult(true)
+        advanceUntilIdle()
+
+        assertEquals(0, engine.startCalls)
+        assertTrue(vm.state.value is MainUiState.Connected)
+    }
+
+    @Test fun restoredConnectedTunnelCanBeDisconnected() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+
+        vm.disconnect()
+        advanceUntilIdle()
+
+        assertEquals(1, engine.stopCalls)
+        assertTrue(vm.state.value is MainUiState.Ready)
+    }
+
+    @Test fun uiFollowsServiceConnectingConnectedAndDeathTransitions() = runTest {
+        val engine = FakeEngine()
+        val vm = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+
+        engine.emit(VpnConnectionState.Connecting); runCurrent()
+        assertTrue(vm.state.value is MainUiState.Connecting)
+        engine.emit(VpnConnectionState.Connected); runCurrent()
+        assertTrue(vm.state.value is MainUiState.Connected)
+        engine.emit(VpnConnectionState.Disconnected); runCurrent()
+        assertTrue(vm.state.value is MainUiState.Ready)
+    }
+
+    @Test fun foreignVpnDoesNotAffectDisconnectedMyVpnState() = runTest {
+        // No ConnectivityManager signal participates in MyVPN state; only its service state does.
+        val engine = FakeEngine(VpnConnectionState.Disconnected)
+        val vm = viewModel(FakeAuth(restored = session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Ready)
+    }
+
     @Test fun expiredAccessWithValidRefreshUsesAuthenticatedFlow() = runTest {
         val auth = FakeAuth(restored = session())
         val vm = viewModel(auth, FakeAccess(VpnAccessResponse("READY", "PREMIUM", CONFIG, premiumExpiresAt = "2026-09-10T00:00:00Z")))
@@ -238,7 +310,7 @@ class MainViewModelTest {
         advanceUntilIdle(); vm.startPhoneVerification("+79991234567"); advanceUntilIdle()
         return vm
     }
-    private fun viewModel(auth: FakeAuth, access: FakeAccess) = MainViewModel(auth, access, FakeEngine(), 2_000) { Instant.parse("2026-09-01T00:00:00Z") }
+    private fun viewModel(auth: FakeAuth, access: FakeAccess, engine: FakeEngine = FakeEngine()) = MainViewModel(auth, access, engine, 2_000) { Instant.parse("2026-09-01T00:00:00Z") }
     private fun session(accessStatus: String = "TRIAL") = Session("access", "refresh", 3600, "account", accessStatus, "2026-09-10T00:00:00Z")
 
     private class FakeAuth(
@@ -259,11 +331,14 @@ class MainViewModelTest {
         private val queue = values.toMutableList()
         override suspend fun current() = if (queue.isNotEmpty()) queue.removeAt(0) else VpnAccessResponse("READY", "TRIAL", CONFIG)
     }
-    private class FakeEngine : VpnEngine {
-        private val mutable = MutableStateFlow<VpnConnectionState>(VpnConnectionState.Disconnected)
+    private class FakeEngine(initial: VpnConnectionState = VpnConnectionState.Disconnected) : VpnEngine {
+        private val mutable = MutableStateFlow(initial)
         override val state: StateFlow<VpnConnectionState> = mutable
-        override suspend fun start(configuration: String) { mutable.value = VpnConnectionState.Connecting }
-        override suspend fun stop() { mutable.value = VpnConnectionState.Disconnecting }
+        var startCalls = 0
+        var stopCalls = 0
+        override suspend fun start(configuration: String) { startCalls++; mutable.value = VpnConnectionState.Connecting }
+        override suspend fun stop() { stopCalls++; mutable.value = VpnConnectionState.Disconnected }
+        fun emit(value: VpnConnectionState) { mutable.value = value }
     }
     private companion object { const val CONFIG = "vless://123e4567-e89b-12d3-a456-426614174000@vpn.example.test:443?type=tcp&security=reality&encryption=none&sni=s&fp=chrome&pbk=p&sid=a" }
 }

@@ -63,6 +63,11 @@ class MyVpnService : VpnService() {
 
     override fun onDestroy() { cleanupLocked(); VpnConnectionStore.update(VpnConnectionState.Disconnected); super.onDestroy() }
 
+    override fun onRevoke() {
+        disconnect()
+        super.onRevoke()
+    }
+
     private fun establishTun(): TunHandle? = Builder().setSession("MyVPN").setMtu(1400)
         .addAddress("10.8.0.2", 32).addRoute("0.0.0.0", 0)
         .addAddress("fd00:8::2", 128).addRoute("::", 0)
