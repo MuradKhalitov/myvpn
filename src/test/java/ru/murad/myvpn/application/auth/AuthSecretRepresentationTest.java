@@ -27,7 +27,7 @@ class AuthSecretRepresentationTest {
                 new AuthProperties.Otp(Duration.ofMinutes(5), Duration.ofMinutes(1), 5, otpPepper),
                 new AuthProperties.Jwt("https://auth.myvpn.local", "android", Duration.ofMinutes(15),
                         "kid", privateKey, publicKey),
-                new AuthProperties.Refresh(Duration.ofDays(30), refreshPepper));
+                new AuthProperties.Refresh(refreshPepper));
 
         assertThat(new OtpRequest(email).toString()).doesNotContain(email);
         assertThat(new OtpVerifyRequest(email, otp).toString()).doesNotContain(email, otp);

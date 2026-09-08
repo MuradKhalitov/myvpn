@@ -38,6 +38,7 @@ public class AuthSession {
     @Column(name = "previous_refresh_token_hash", length = 64)
     private String previousRefreshTokenHash;
 
+    /** Legacy nullable column; no longer participates in authentication. */
     @Column(name = "previous_refresh_valid_until")
     private Instant previousRefreshValidUntil;
 
@@ -67,19 +68,14 @@ public class AuthSession {
         return revokedAt == null;
     }
 
-    /** Keeps only a bounded previous-token recovery window; session life is revoke-only. */
-    public void rotate(String newRefreshTokenHash, Instant now, Instant previousValidUntil) {
+    /** Keeps exactly one previous generation until the next current-token rotation. */
+    public void rotate(String newRefreshTokenHash, Instant now) {
         previousRefreshTokenHash = refreshTokenHash;
-        previousRefreshValidUntil = previousValidUntil;
+        previousRefreshValidUntil = null;
         refreshTokenHash = newRefreshTokenHash;
         rotationCounter++;
         lastUsedAt = now;
         expiresAt = null;
-    }
-
-    public boolean canRecoverPreviousAt(Instant now) {
-        return revokedAt == null && previousRefreshValidUntil != null
-                && !now.isAfter(previousRefreshValidUntil);
     }
 
     public void revoke(Instant now) {

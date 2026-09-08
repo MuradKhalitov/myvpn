@@ -35,7 +35,7 @@ class JwtTokenServiceTest {
                 new AuthProperties.Otp(Duration.ofMinutes(5), Duration.ofMinutes(1), 5, "otp"),
                 new AuthProperties.Jwt("https://auth.myvpn.local", "myvpn-android", Duration.ofMinutes(15),
                         "test-key", "private", "public"),
-                new AuthProperties.Refresh(Duration.ofDays(30), "refresh"));
+                new AuthProperties.Refresh("refresh"));
         JwtTokenService service = new JwtTokenService(
                 encoder, properties, Clock.fixed(now, ZoneOffset.UTC));
         UUID accountId = UUID.randomUUID();

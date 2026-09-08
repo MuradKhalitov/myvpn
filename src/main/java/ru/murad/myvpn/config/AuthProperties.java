@@ -36,10 +36,10 @@ public record AuthProperties(
         }
     }
 
-    public record Refresh(Duration recoveryGrace, String pepper) {
+    public record Refresh(String pepper) {
         @Override
         public String toString() {
-            return "Refresh[recoveryGrace=" + recoveryGrace + ", pepper=<redacted>]";
+            return "Refresh[pepper=<redacted>]";
         }
     }
 

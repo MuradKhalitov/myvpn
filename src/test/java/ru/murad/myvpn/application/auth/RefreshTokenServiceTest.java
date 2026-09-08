@@ -35,7 +35,7 @@ class RefreshTokenServiceTest {
         assertThat(tokens.getRefreshToken()).isEqualTo("next-token");
         assertThat(f.session.getRefreshTokenHash()).isEqualTo("next-hash");
         assertThat(f.session.getPreviousRefreshTokenHash()).isEqualTo("old-hash");
-        assertThat(f.session.getPreviousRefreshValidUntil()).isEqualTo(NOW.plusSeconds(120));
+        assertThat(f.session.getPreviousRefreshValidUntil()).isNull();
         assertThat(f.session.getRotationCounter()).isEqualTo(1);
         assertThat(f.session.getExpiresAt()).isNull();
         verify(f.repository).flush();
@@ -43,7 +43,7 @@ class RefreshTokenServiceTest {
 
     @Test void previousTokenRecoversSameRotationAfterLostResponse() {
         Fixture f = fixture();
-        f.session.rotate("current-hash", NOW.minusSeconds(30), NOW.plusSeconds(90));
+        f.session.rotate("current-hash", NOW.minusSeconds(30));
         when(f.hash.hash("old-token")).thenReturn("old-hash");
         when(f.repository.findByRefreshTokenHashForUpdate("old-hash")).thenReturn(Optional.empty());
         when(f.repository.findByPreviousRefreshTokenHashForUpdate("old-hash")).thenReturn(Optional.of(f.session));
@@ -55,15 +55,15 @@ class RefreshTokenServiceTest {
         assertThat(f.session.getRotationCounter()).isEqualTo(1);
     }
 
-    @Test void previousTokenCannotRecoverOutsideBoundedGrace() {
+    @Test void previousTokenRecoversWithoutAnyTimeDeadline() {
         Fixture f = fixture();
-        f.session.rotate("current-hash", NOW.minusSeconds(180), NOW.minusSeconds(60));
+        f.session.rotate("current-hash", NOW.minus(Duration.ofDays(3650)));
         when(f.hash.hash("old-token")).thenReturn("old-hash");
         when(f.repository.findByPreviousRefreshTokenHashForUpdate("old-hash")).thenReturn(Optional.of(f.session));
 
-        assertThatThrownBy(() -> f.service.refresh("old-token"))
-                .isInstanceOf(RefreshAuthenticationException.class)
-                .extracting("reason").isEqualTo(RefreshAuthenticationException.Reason.REFRESH_TOKEN_INVALID);
+        when(f.hash.deriveRotatedToken(f.session.getId(), 1)).thenReturn("same-current-token");
+        assertThat(f.service.refresh("old-token").getRefreshToken()).isEqualTo("same-current-token");
+        assertThat(f.session.getRotationCounter()).isEqualTo(1);
     }
 
     @Test void revokedSessionIsExplicitlyRejectedEvenWithoutExpiry() {
@@ -82,7 +82,7 @@ class RefreshTokenServiceTest {
                 .createdAt(NOW.minus(Duration.ofDays(800))).updatedAt(NOW).build();
         AuthSession session = AuthSession.builder().id(UUID.randomUUID()).account(account)
                 .refreshTokenHash("old-hash").tokenFamilyId(UUID.randomUUID())
-                .createdAt(NOW.minus(Duration.ofDays(800))).build();
+                .createdAt(NOW.minus(Duration.ofDays(800))).expiresAt(NOW.minusSeconds(1)).build();
         AuthSessionRepository repository = mock(AuthSessionRepository.class);
         RefreshTokenHashService hash = mock(RefreshTokenHashService.class);
         JwtTokenService jwt = mock(JwtTokenService.class);
@@ -95,7 +95,7 @@ class RefreshTokenServiceTest {
         return new AuthProperties(true, "from@example.com",
                 new AuthProperties.Otp(Duration.ofMinutes(5), Duration.ofMinutes(1), 5, "otp"),
                 new AuthProperties.Jwt("https://auth.myvpn.local", "android", Duration.ofMinutes(15), "key", "private", "public"),
-                new AuthProperties.Refresh(Duration.ofMinutes(2), "refresh"));
+                new AuthProperties.Refresh("refresh"));
     }
 
     private record Fixture(AuthSessionRepository repository, RefreshTokenHashService hash,

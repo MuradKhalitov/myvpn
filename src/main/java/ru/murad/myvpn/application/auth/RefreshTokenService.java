@@ -36,13 +36,11 @@ public class RefreshTokenService {
         if (current.isEmpty()) {
             var previous = sessionRepository.findByPreviousRefreshTokenHashForUpdate(hash)
                     .orElseThrow(this::invalid);
-            if (!previous.canRecoverPreviousAt(now)) {
-                log.info("Refresh rejected: reason=PREVIOUS_TOKEN_OUTSIDE_GRACE sessionId={}", previous.getId());
-                throw invalid();
-            }
             validateSession(previous);
+            // Only the immediately preceding generation is stored. Recovery
+            // remains possible until the current credential is used to rotate.
             String recovered = refreshHmac.deriveRotatedToken(previous.getId(), previous.getRotationCounter());
-            log.info("Refresh recovered after lost response: sessionId={} rotation={}",
+            log.info("REFRESH_RECOVERY sessionId={} ROTATION_COUNTER={}",
                     previous.getId(), previous.getRotationCounter());
             return tokens(previous, recovered);
         }
@@ -50,9 +48,9 @@ public class RefreshTokenService {
         validateSession(session);
         long nextCounter = Math.addExact(session.getRotationCounter(), 1L);
         String nextRefreshToken = refreshHmac.deriveRotatedToken(session.getId(), nextCounter);
-        session.rotate(refreshHmac.hash(nextRefreshToken), now, now.plus(properties.refresh().recoveryGrace()));
+        session.rotate(refreshHmac.hash(nextRefreshToken), now);
         sessionRepository.flush();
-        log.info("Refresh rotated: sessionId={} rotation={}", session.getId(), session.getRotationCounter());
+        log.info("REFRESH_SUCCESS sessionId={} ROTATION_COUNTER={}", session.getId(), session.getRotationCounter());
         return tokens(session, nextRefreshToken);
     }
 
@@ -70,6 +68,7 @@ public class RefreshTokenService {
     }
 
     private RefreshAuthenticationException invalid() {
+        log.info("REFRESH_INVALID");
         return new RefreshAuthenticationException(RefreshAuthenticationException.Reason.REFRESH_TOKEN_INVALID);
     }
 }

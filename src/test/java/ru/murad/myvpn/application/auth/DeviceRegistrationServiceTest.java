@@ -66,7 +66,6 @@ class DeviceRegistrationServiceTest {
     void setUp() {
         org.springframework.transaction.support.TransactionSynchronizationManager.initSynchronization();
         lenient().when(properties.refresh()).thenReturn(refresh);
-        lenient().when(refresh.recoveryGrace()).thenReturn(Duration.ofMinutes(2));
         lenient().when(properties.jwt()).thenReturn(jwt);
         lenient().when(jwt.accessTtl()).thenReturn(Duration.ofMinutes(15));
         lenient().when(refreshTokenGenerator.generate()).thenReturn("refresh-token");

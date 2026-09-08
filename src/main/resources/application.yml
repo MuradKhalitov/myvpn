@@ -128,9 +128,8 @@ auth:
     private-key-base64: ${AUTH_JWT_PRIVATE_KEY_BASE64:}
     public-key-base64: ${AUTH_JWT_PUBLIC_KEY_BASE64:}
   refresh:
-    # A previous credential may only recover the already-issued rotated token
-    # during this bounded lost-response window. Sessions otherwise live until revoked.
-    recovery-grace: ${AUTH_REFRESH_RECOVERY_GRACE:2m}
+    # Stable shared secret across restarts and instances. Previous-token recovery
+    # lasts until the current token is used for the next rotation, regardless of time.
     pepper: ${AUTH_REFRESH_PEPPER:}
 
 security:

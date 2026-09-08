@@ -65,6 +65,9 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
         JsonNode revoked = postJson("/api/v1/auth/refresh",
                 "{\"refreshToken\":\"" + nextRefresh + "\"}", 401);
         assertThat(revoked.path("code").asText()).isEqualTo("SESSION_REVOKED");
+        JsonNode revokedPrevious = postJson("/api/v1/auth/refresh",
+                "{\"refreshToken\":\"" + firstRefresh + "\"}", 401);
+        assertThat(revokedPrevious.path("code").asText()).isEqualTo("SESSION_REVOKED");
 
         JsonNode invalid = postJson("/api/v1/auth/refresh",
                 "{\"refreshToken\":\"unknown-refresh-token\"}", 401);
