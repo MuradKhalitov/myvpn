@@ -8,6 +8,7 @@ import com.myvpn.android.data.Session
 import com.myvpn.android.data.SessionExpiredException
 import com.myvpn.android.data.SessionRefreshUnavailableException
 import com.myvpn.android.data.SessionRecoveryException
+import com.myvpn.android.data.AuthDiagnostics
 import kotlinx.coroutines.CancellationException
 import com.myvpn.android.data.VpnAccessResponse
 import com.myvpn.android.data.VpnAccessSource
@@ -23,7 +24,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
-enum class AppError { NETWORK_UNAVAILABLE, BACKEND_UNAVAILABLE, PHONE_START_REJECTED, VERIFICATION_EXPIRED, VERIFICATION_FAILED, EXCHANGE_FAILED, VPN_PROVISIONING_FAILED, SESSION_EXPIRED, SESSION_RECOVERY_FAILED }
+enum class AppError { NETWORK_UNAVAILABLE, BACKEND_UNAVAILABLE, PHONE_START_REJECTED, VERIFICATION_EXPIRED, VERIFICATION_FAILED, EXCHANGE_FAILED, VPN_PROVISIONING_FAILED, SESSION_EXPIRED, SESSION_RECOVERY_FAILED, RESPONSE_FORMAT }
 
 sealed interface MainUiState {
     data object Initializing : MainUiState
@@ -63,8 +64,15 @@ class MainViewModel(
     private var pollingJob: Job? = null
     private var vpnJob: Job? = null
     private var exchangeStarted = false
+    private var restoreAttempt = 0L
 
     init {
+        viewModelScope.launch {
+            state.collect { current ->
+                AuthDiagnostics.event("UI_STATE_CHANGED", "state=${current::class.java.simpleName}" +
+                    if (current is MainUiState.Error) " category=${current.type}" else "")
+            }
+        }
         restoreAuth()
         viewModelScope.launch {
             engine.state.collect { connection ->
@@ -82,19 +90,25 @@ class MainViewModel(
 
     fun restoreAuth() {
         pollingJob?.cancel(); vpnJob?.cancel()
-        safeAuthLog("AUTH_STARTUP")
+        val attempt = ++restoreAttempt
+        AuthDiagnostics.event("AUTH_RESTORE_STARTED", "attempt=$attempt")
+        _state.value = MainUiState.Initializing
         viewModelScope.launch {
             val restored = try {
                 auth.restoreSession()
             } catch (failure: CancellationException) {
+                AuthDiagnostics.event("AUTH_RESTORE_FINISHED", "attempt=$attempt result=CANCELLED")
                 throw failure
             } catch (failure: SessionRefreshUnavailableException) {
+                AuthDiagnostics.event("AUTH_RESTORE_FINISHED", "attempt=$attempt result=ERROR category=${AuthDiagnostics.category(failure)}")
                 _state.value = errorFor(failure.cause ?: failure, AppError.SESSION_EXPIRED)
                 return@launch
             } catch (failure: Throwable) {
+                AuthDiagnostics.event("AUTH_RESTORE_FINISHED", "attempt=$attempt result=ERROR category=${AuthDiagnostics.category(failure)}")
                 _state.value = errorFor(failure, AppError.SESSION_EXPIRED)
                 return@launch
             }
+            AuthDiagnostics.event("AUTH_RESTORE_FINISHED", "attempt=$attempt result=${if (restored == null) "NO_SESSION" else "SUCCESS"}")
             if (restored == null) {
                 safeAuthLog("Auth restore result=LOCAL_MISSING_CORRUPTED_OR_REVOKED")
                 session = null
@@ -194,7 +208,7 @@ class MainViewModel(
     }
 
     fun retry() {
-        safeAuthLog("Retry triggered: state=${_state.value::class.java.simpleName}")
+        AuthDiagnostics.event("AUTH_RETRY_CLICKED", "state=${_state.value::class.java.simpleName}")
         when (val current = _state.value) {
             is MainUiState.PhoneEntry -> _state.value = MainUiState.PhoneEntry()
             is MainUiState.PhoneVerification -> onReturnedFromDialer()
@@ -211,16 +225,19 @@ class MainViewModel(
     private fun loadVpn() {
         vpnJob?.cancel()
         vpnJob = viewModelScope.launch {
+            AuthDiagnostics.event("VPN_LOAD_STARTED")
             while (isActive) {
                 val result = runCatching { access.current() }
                 val vpn = result.getOrElse { failure ->
                     if (failure is CancellationException) throw failure
+                    AuthDiagnostics.event("VPN_LOAD_FINISHED", "result=ERROR category=${AuthDiagnostics.category(failure)}")
                     if (failure is SessionExpiredException) {
                             session = null
                             _state.value = MainUiState.PhoneEntry("Сессия истекла. Войдите по номеру телефона.")
                     } else _state.value = errorFor(failure, AppError.VPN_PROVISIONING_FAILED)
                     return@launch
                 }
+                AuthDiagnostics.event("VPN_LOAD_FINISHED", "result=SUCCESS")
                 when (vpn.status) {
                             "READY" -> {
                                 if (vpn.entitlement == "EXPIRED") _state.value = MainUiState.Expired()
@@ -280,6 +297,7 @@ class MainViewModel(
         else -> MainUiState.Error(AppError.PHONE_START_REJECTED, "Не удалось начать подтверждение номера", true)
     }
     private fun errorFor(error: Throwable, fallback: AppError): MainUiState.Error = when (error) {
+        is kotlinx.serialization.SerializationException -> MainUiState.Error(AppError.RESPONSE_FORMAT, "Не удалось обработать ответ сервиса. Повторите попытку.", true)
         is SessionRecoveryException -> MainUiState.Error(AppError.SESSION_RECOVERY_FAILED, "Не удалось восстановить сессию", true)
         is SessionRefreshUnavailableException -> errorFor(error.cause ?: error, AppError.SESSION_EXPIRED)
         is IOException -> MainUiState.Error(AppError.NETWORK_UNAVAILABLE, "Нет подключения к сети", true)

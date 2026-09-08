@@ -288,7 +288,7 @@ class PhoneAuthRepositoryTest {
         val refreshRequests = mutableListOf<String>()
         val accessCalls = mutableListOf<String>()
         override suspend fun register(request: DeviceRegisterRequest) = auth()
-        override suspend fun refresh(request: RefreshRequest): AuthResponse {
+        override suspend fun refresh(request: RefreshRequest): RefreshResponse {
             refreshCalls++
             refreshRequests += request.refreshToken
             onRefresh()
@@ -306,7 +306,7 @@ class PhoneAuthRepositoryTest {
             if (refreshFailures.isNotEmpty()) throw refreshFailures.removeFirst()
             refreshFailure?.let { throw it }
             if (refreshDelayMillis > 0) delay(refreshDelayMillis)
-            return if (simulateRotation) auth().copy(refreshToken = currentRefresh) else auth()
+            return RefreshResponse("new-access", if (simulateRotation) currentRefresh else "new-refresh", expiresIn = 900)
         }
         override suspend fun startPhone(request: PhoneVerificationStartRequest) = PhoneVerificationStartResponse("verification", "+79990000000", "+7 999 000-00-00", "2026-10-01T00:00:00Z")
         override suspend fun phoneStatus(verificationId: String) = PhoneVerificationStatusResponse("PENDING")

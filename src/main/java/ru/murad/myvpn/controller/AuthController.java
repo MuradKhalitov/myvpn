@@ -1,6 +1,7 @@
 package ru.murad.myvpn.controller;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,6 +28,7 @@ import java.util.UUID;
 @RequestMapping("/api/v1/auth")
 @ConditionalOnProperty(name = "auth.enabled", havingValue = "true")
 @RequiredArgsConstructor
+@Slf4j
 public class AuthController {
 
     private final EmailOtpRequestService requestService;
@@ -49,8 +51,16 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public Mono<AuthTokens> refresh(@RequestBody RefreshTokenRequest request) {
+        log.info("REFRESH_REQUEST_STARTED");
         return Mono.fromCallable(() -> refreshTokenService.refresh(request.refreshToken()))
-                .subscribeOn(Schedulers.boundedElastic());
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnSuccess(tokens -> log.info("REFRESH_TRANSACTION_FINISHED result=SUCCESS"))
+                .doOnError(failure -> log.warn("REFRESH_TRANSACTION_FINISHED result=ERROR category={}",
+                        failure instanceof org.springframework.dao.DataAccessException ? "DB"
+                                : failure instanceof org.springframework.transaction.TransactionException ? "TRANSACTION"
+                                : failure instanceof ru.murad.myvpn.application.auth.RefreshAuthenticationException ? "AUTH_DOMAIN"
+                                : failure instanceof org.springframework.security.oauth2.jwt.JwtException ? "JWT"
+                                : "INTERNAL"));
     }
 
     @PostMapping("/logout")

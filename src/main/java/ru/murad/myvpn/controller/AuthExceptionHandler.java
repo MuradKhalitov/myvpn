@@ -1,5 +1,7 @@
 package ru.murad.myvpn.controller;
 
+import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -11,10 +13,12 @@ import ru.murad.myvpn.dto.AuthErrorResponse;
 
 @RestControllerAdvice
 @ConditionalOnProperty(name = "auth.enabled", havingValue = "true")
+@Slf4j
 public class AuthExceptionHandler {
 
     @ExceptionHandler(RefreshAuthenticationException.class)
     public ResponseEntity<AuthErrorResponse> refreshAuthentication(RefreshAuthenticationException exception) {
+        log.info("REFRESH_HTTP_RESULT status=401 code={}", exception.getReason());
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(new AuthErrorResponse(exception.getReason().name(), "Refresh session is invalid or revoked"));
     }

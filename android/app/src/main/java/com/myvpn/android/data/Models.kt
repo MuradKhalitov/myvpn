@@ -4,6 +4,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable data class DeviceRegisterRequest(val installId: String, val deviceSecret: String)
 @Serializable data class AuthResponse(val accountId: String, val accessToken: String, val refreshToken: String, val tokenType: String = "Bearer", val expiresIn: Long)
+/** /auth/refresh returns AuthTokens, without accountId (unlike registration/exchange). */
+@Serializable data class RefreshResponse(val accessToken: String, val refreshToken: String, val tokenType: String = "Bearer", val expiresIn: Long)
 @Serializable data class RefreshRequest(val refreshToken: String)
 @Serializable data class PhoneVerificationStartRequest(val phone: String)
 @Serializable data class PhoneVerificationStartResponse(val verificationId: String, val callPhone: String, val callPhonePretty: String? = null, val expiresAt: String)

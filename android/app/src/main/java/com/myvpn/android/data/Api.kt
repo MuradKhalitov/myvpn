@@ -20,7 +20,7 @@ private val authErrorJson = Json { ignoreUnknownKeys = true }
 interface MyVpnApi {
     // Kept only for backward compatibility with legacy DEVICE installations.
     @POST("api/v1/device/register") suspend fun register(@Body request: DeviceRegisterRequest): AuthResponse
-    @POST("api/v1/auth/refresh") suspend fun refresh(@Body request: RefreshRequest): AuthResponse
+    @POST("api/v1/auth/refresh") suspend fun refresh(@Body request: RefreshRequest): RefreshResponse
     @POST("api/v1/auth/phone/start") suspend fun startPhone(@Body request: PhoneVerificationStartRequest): PhoneVerificationStartResponse
     @GET("api/v1/auth/phone/{verificationId}/status") suspend fun phoneStatus(@Path("verificationId") verificationId: String): PhoneVerificationStatusResponse
     @POST("api/v1/auth/phone/exchange") suspend fun exchangePhone(@Body request: PhoneVerificationExchangeRequest): PhoneAuthResponse
@@ -39,14 +39,20 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionS
     private val mutex = Mutex()
     @Volatile private var currentSession: Session? = null
 
-    override suspend fun restoreSession(): Session? = mutex.withLock {
-        val saved = loadPersistedSession() ?: run {
-            currentSession = null
-            log("Auth restore: refreshPresent=false result=MISSING_OR_CORRUPTED_CREDENTIAL")
-            return@withLock null
+    override suspend fun restoreSession(): Session? {
+        AuthDiagnostics.event("AUTH_RESTORE_LOCK_WAIT")
+        return mutex.withLock {
+            AuthDiagnostics.event("AUTH_RESTORE_LOCK_ACQUIRED")
+            val saved = loadPersistedSession() ?: run {
+                currentSession = null
+                log("Auth restore: refreshPresent=false result=MISSING_OR_CORRUPTED_CREDENTIAL")
+                return@withLock null
+            }
+            log("AUTH_STARTUP ${if (saved.accessTokenIsValid()) "ACCESS_VALID" else "ACCESS_EXPIRED"} accessPresent=${saved.accessToken.isNotBlank()}")
+            AuthDiagnostics.event("ACCESS_PRESENT", "value=${saved.accessToken.isNotBlank()}")
+            AuthDiagnostics.event("ACCESS_EXPIRED", "value=${!saved.accessTokenIsValid()} expirationPresent=${saved.expiresAtMillis > 0}")
+            if (saved.accessTokenIsValid()) saved.also { currentSession = it } else refresh(saved)
         }
-        log("AUTH_STARTUP ${if (saved.accessTokenIsValid()) "ACCESS_VALID" else "ACCESS_EXPIRED"} accessPresent=${saved.accessToken.isNotBlank()}")
-        if (saved.accessTokenIsValid()) saved.also { currentSession = it } else refresh(saved)
     }
 
     override suspend fun startVerification(phone: String) = api.startPhone(PhoneVerificationStartRequest(phone))
@@ -76,7 +82,7 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionS
     }
 
     private suspend fun refresh(previous: Session, reconcile: Boolean = true): Session? = try {
-        log("REFRESH_ATTEMPT")
+        log("REFRESH_REQUEST_STARTED")
         val response = api.refresh(RefreshRequest(previous.refreshToken))
         if (response.accessToken.isBlank() || response.refreshToken.isBlank()) {
             throw SessionRefreshUnavailableException(IllegalStateException("Refresh response has missing credentials"))
@@ -84,10 +90,11 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionS
         Session(response.accessToken, response.refreshToken, response.expiresIn, previous.accountId, previous.accessStatus, previous.accessExpiresAt).also { session ->
             store.save(session)
             currentSession = session
-            log("REFRESH_SUCCESS")
+            log("REFRESH_RESULT result=SUCCESS persisted=true")
         }
     } catch (exception: HttpException) {
         val code = refreshErrorCode(exception)
+        AuthDiagnostics.event("REFRESH_RESULT", "status=${exception.code()} code=${safeDomainCode(code)}")
         if (code == "SESSION_REVOKED") {
             log("SESSION_REVOKED")
             currentSession = null
@@ -109,10 +116,13 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionS
     } catch (exception: java.io.IOException) {
         log("REFRESH_TRANSIENT_ERROR transport=${exception::class.java.simpleName}")
         throw SessionRefreshUnavailableException(exception)
+    } catch (exception: kotlinx.serialization.SerializationException) {
+        AuthDiagnostics.event("REFRESH_RESULT", "result=ERROR category=RESPONSE_FORMAT")
+        throw exception
     }
 
     private suspend fun loadPersistedSession(): Session? = try {
-        store.session()?.also {
+        store.session().also { AuthDiagnostics.event("DEVICE_CREDENTIAL_PRESENT", "value=${it != null}") }?.also {
             if (it.refreshToken.isBlank()) throw CorruptedLocalCredentialException(IllegalStateException("Empty local credential"))
         }
     } catch (failure: CorruptedLocalCredentialException) {
@@ -127,6 +137,11 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionS
             authErrorJson.decodeFromString<AuthErrorResponse>(
                 exception.response()?.errorBody()?.string().orEmpty())
         }.getOrNull()?.code
+    }
+
+    private fun safeDomainCode(code: String?): String = when (code) {
+        "SESSION_REVOKED", "REFRESH_TOKEN_INVALID", "REFRESH_TOKEN_REVOKED", "INVALID_AUTHENTICATION" -> code
+        else -> "UNKNOWN"
     }
 
     private fun log(message: String) {
@@ -155,8 +170,23 @@ class VpnAccessRepository(private val api: MyVpnApi, private val auth: PhoneAuth
 }
 
 object ApiFactory {
-    fun create(): MyVpnApi {
+    fun create(baseUrl: String = BuildConfig.API_BASE_URL): MyVpnApi {
         val json = Json { ignoreUnknownKeys = true }
-        return Retrofit.Builder().baseUrl(BuildConfig.API_BASE_URL).client(OkHttpClient.Builder().build()).addConverterFactory(json.asConverterFactory("application/json".toMediaType())).build().create(MyVpnApi::class.java)
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            val phase = when (chain.request().url.encodedPath) {
+                "/api/v1/auth/refresh" -> "REFRESH"
+                "/api/v1/vpn/access" -> "VPN_ACCESS"
+                else -> null
+            }
+            try {
+                chain.proceed(chain.request()).also { response ->
+                    if (phase != null) AuthDiagnostics.event("${phase}_HTTP_STATUS", "status=${response.code}")
+                }
+            } catch (failure: java.io.IOException) {
+                if (phase != null) AuthDiagnostics.event("${phase}_HTTP_STATUS", "status=NONE category=${AuthDiagnostics.category(failure)}")
+                throw failure
+            }
+        }.build()
+        return Retrofit.Builder().baseUrl(baseUrl).client(client).addConverterFactory(json.asConverterFactory("application/json".toMediaType())).build().create(MyVpnApi::class.java)
     }
 }

@@ -36,27 +36,30 @@ public class RefreshTokenService {
         if (current.isEmpty()) {
             var previous = sessionRepository.findByPreviousRefreshTokenHashForUpdate(hash)
                     .orElseThrow(this::invalid);
+            log.info("REFRESH_MATCH match=PREVIOUS sessionId={} revoked={}", previous.getId(), previous.getRevokedAt() != null);
             validateSession(previous);
             // Only the immediately preceding generation is stored. Recovery
             // remains possible until the current credential is used to rotate.
             String recovered = refreshHmac.deriveRotatedToken(previous.getId(), previous.getRotationCounter());
-            log.info("REFRESH_RECOVERY sessionId={} ROTATION_COUNTER={}",
+            log.info("REFRESH_RECOVERY match=PREVIOUS revoked=no result=RECOVERY sessionId={} ROTATION_COUNTER={}",
                     previous.getId(), previous.getRotationCounter());
             return tokens(previous, recovered);
         }
         var session = current.get();
+        log.info("REFRESH_MATCH match=CURRENT sessionId={} revoked={}", session.getId(), session.getRevokedAt() != null);
         validateSession(session);
         long nextCounter = Math.addExact(session.getRotationCounter(), 1L);
         String nextRefreshToken = refreshHmac.deriveRotatedToken(session.getId(), nextCounter);
         session.rotate(refreshHmac.hash(nextRefreshToken), now);
         sessionRepository.flush();
-        log.info("REFRESH_SUCCESS sessionId={} ROTATION_COUNTER={}", session.getId(), session.getRotationCounter());
+        log.info("REFRESH_SUCCESS match=CURRENT revoked=no result=SUCCESS sessionId={} ROTATION_COUNTER={}", session.getId(), session.getRotationCounter());
         return tokens(session, nextRefreshToken);
     }
 
     private void validateSession(AuthSession session) {
         if (session.getRevokedAt() != null || session.getAccount().getStatus() != AccountStatus.ACTIVE) {
-            log.info("Refresh rejected: reason=SESSION_REVOKED sessionId={}", session.getId());
+            log.info("SESSION_REVOKED result=REVOKED sessionId={} revoked={} accountActive={}",
+                    session.getId(), session.getRevokedAt() != null, session.getAccount().getStatus() == AccountStatus.ACTIVE);
             throw new RefreshAuthenticationException(RefreshAuthenticationException.Reason.SESSION_REVOKED);
         }
     }
@@ -68,7 +71,7 @@ public class RefreshTokenService {
     }
 
     private RefreshAuthenticationException invalid() {
-        log.info("REFRESH_INVALID");
+        log.info("REFRESH_INVALID match=NONE revoked=UNKNOWN result=INVALID");
         return new RefreshAuthenticationException(RefreshAuthenticationException.Reason.REFRESH_TOKEN_INVALID);
     }
 }

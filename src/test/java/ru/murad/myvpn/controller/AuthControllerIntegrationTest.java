@@ -47,6 +47,11 @@ class AuthControllerIntegrationTest extends AuthIntegrationTestSupport {
 
         JsonNode rotated = postJson("/api/v1/auth/refresh",
                 "{\"refreshToken\":\"" + firstRefresh + "\"}", 200);
+        // The same shape is consumed by Android's HTTP regression fixture.
+        assertThat(rotated.has("accountId")).isFalse();
+        assertThat(rotated.size()).isEqualTo(4);
+        assertThat(rotated.has("accessToken") && rotated.has("refreshToken")
+                && rotated.has("tokenType") && rotated.has("expiresIn")).isTrue();
         String nextRefresh = rotated.path("refreshToken").asText();
         assertThat(nextRefresh).isNotEqualTo(firstRefresh);
 
