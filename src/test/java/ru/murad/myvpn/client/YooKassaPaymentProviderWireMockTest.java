@@ -79,6 +79,20 @@ class YooKassaPaymentProviderWireMockTest {
         assertThat(created.providerPaymentId()).isEqualTo("payment-1");
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"10.00", "20.00", "30.00", "50.00"})
+    void sendsBetaAmountAsRubDecimal(String amount) {
+        server.stubFor(post(urlEqualTo("/payments")).willReturn(json(paymentWithAmount(amount))));
+        var original = command();
+        provider.createPayment(new CreatePaymentCommand(orderId, idempotenceKey,
+                new BigDecimal(amount), "RUB", original.description(), original.returnUrl(), original.metadata()));
+        server.verify(postRequestedFor(urlEqualTo("/payments"))
+                .withRequestBody(com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath(
+                        "$.amount.value", equalTo(amount)))
+                .withRequestBody(com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath(
+                        "$.amount.currency", equalTo("RUB"))));
+    }
+
     @Test
     void repeatedCreateUsesSameIdempotenceKey() {
         server.stubFor(post(urlEqualTo("/payments")).willReturn(json(payment("pending", false))));

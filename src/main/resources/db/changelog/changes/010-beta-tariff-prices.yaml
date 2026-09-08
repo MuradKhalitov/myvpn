@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 010-beta-tariff-prices
+      author: myvpn
+      changes:
+        - sql:
+            sql: |
+              UPDATE vpn_tariffs SET price = 10.00 WHERE code = 'MONTH_1';
+              UPDATE vpn_tariffs SET price = 20.00 WHERE code = 'MONTH_3';
+              UPDATE vpn_tariffs SET price = 30.00 WHERE code = 'MONTH_6';
+              UPDATE vpn_tariffs SET price = 50.00 WHERE code = 'YEAR_1';
+      rollback:
+        - sql:
+            sql: |
+              UPDATE vpn_tariffs SET price = 90.00 WHERE code = 'MONTH_1';
+              UPDATE vpn_tariffs SET price = 240.00 WHERE code = 'MONTH_3';
+              UPDATE vpn_tariffs SET price = 420.00 WHERE code = 'MONTH_6';
+              UPDATE vpn_tariffs SET price = 720.00 WHERE code = 'YEAR_1';
