@@ -7,6 +7,8 @@ import com.myvpn.android.data.PhoneVerificationStartResponse
 import com.myvpn.android.data.Session
 import com.myvpn.android.data.SessionExpiredException
 import com.myvpn.android.data.SessionRefreshUnavailableException
+import com.myvpn.android.data.SessionRecoveryException
+import kotlinx.coroutines.CancellationException
 import com.myvpn.android.data.VpnAccessResponse
 import com.myvpn.android.data.VpnAccessSource
 import com.myvpn.android.vpn.VpnConnectionState
@@ -21,7 +23,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
-enum class AppError { NETWORK_UNAVAILABLE, BACKEND_UNAVAILABLE, PHONE_START_REJECTED, VERIFICATION_EXPIRED, VERIFICATION_FAILED, EXCHANGE_FAILED, VPN_PROVISIONING_FAILED, SESSION_EXPIRED }
+enum class AppError { NETWORK_UNAVAILABLE, BACKEND_UNAVAILABLE, PHONE_START_REJECTED, VERIFICATION_EXPIRED, VERIFICATION_FAILED, EXCHANGE_FAILED, VPN_PROVISIONING_FAILED, SESSION_EXPIRED, SESSION_RECOVERY_FAILED }
 
 sealed interface MainUiState {
     data object Initializing : MainUiState
@@ -80,10 +82,12 @@ class MainViewModel(
 
     fun restoreAuth() {
         pollingJob?.cancel(); vpnJob?.cancel()
-        safeAuthLog("Startup auth restore requested")
+        safeAuthLog("AUTH_STARTUP")
         viewModelScope.launch {
             val restored = try {
                 auth.restoreSession()
+            } catch (failure: CancellationException) {
+                throw failure
             } catch (failure: SessionRefreshUnavailableException) {
                 _state.value = errorFor(failure.cause ?: failure, AppError.SESSION_EXPIRED)
                 return@launch
@@ -92,7 +96,8 @@ class MainViewModel(
                 return@launch
             }
             if (restored == null) {
-                safeAuthLog("Auth restore result=NO_LOCAL_OR_CONFIRMED_INVALID_SESSION")
+                safeAuthLog("Auth restore result=LOCAL_MISSING_CORRUPTED_OR_REVOKED")
+                session = null
                 _state.value = MainUiState.PhoneEntry()
             } else {
                 safeAuthLog("Auth restore result=AUTHENTICATED")
@@ -196,8 +201,8 @@ class MainViewModel(
             is MainUiState.Error -> when (current.type) {
                 AppError.VERIFICATION_EXPIRED, AppError.VERIFICATION_FAILED -> { activeVerification = null; exchangeStarted = false; _state.value = MainUiState.PhoneEntry() }
                 AppError.EXCHANGE_FAILED -> { exchangeStarted = false; onReturnedFromDialer() }
-                AppError.SESSION_EXPIRED, AppError.NETWORK_UNAVAILABLE, AppError.BACKEND_UNAVAILABLE -> if (session == null) restoreAuth() else loadVpn()
-                else -> if (session == null) _state.value = MainUiState.PhoneEntry() else loadVpn()
+                AppError.SESSION_EXPIRED, AppError.SESSION_RECOVERY_FAILED, AppError.NETWORK_UNAVAILABLE, AppError.BACKEND_UNAVAILABLE -> restoreAuth()
+                else -> restoreAuth()
             }
             else -> loadVpn()
         }
@@ -209,6 +214,7 @@ class MainViewModel(
             while (isActive) {
                 val result = runCatching { access.current() }
                 val vpn = result.getOrElse { failure ->
+                    if (failure is CancellationException) throw failure
                     if (failure is SessionExpiredException) {
                             session = null
                             _state.value = MainUiState.PhoneEntry("Сессия истекла. Войдите по номеру телефона.")
@@ -274,6 +280,8 @@ class MainViewModel(
         else -> MainUiState.Error(AppError.PHONE_START_REJECTED, "Не удалось начать подтверждение номера", true)
     }
     private fun errorFor(error: Throwable, fallback: AppError): MainUiState.Error = when (error) {
+        is SessionRecoveryException -> MainUiState.Error(AppError.SESSION_RECOVERY_FAILED, "Не удалось восстановить сессию", true)
+        is SessionRefreshUnavailableException -> errorFor(error.cause ?: error, AppError.SESSION_EXPIRED)
         is IOException -> MainUiState.Error(AppError.NETWORK_UNAVAILABLE, "Нет подключения к сети", true)
         is HttpException -> MainUiState.Error(
             if (error.code() == 408 || error.code() == 429 || error.code() >= 500) AppError.BACKEND_UNAVAILABLE else fallback,

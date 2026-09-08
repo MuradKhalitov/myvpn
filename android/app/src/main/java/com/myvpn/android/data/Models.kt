@@ -24,13 +24,16 @@ data class Session(
     val accessExpiresAt: String? = null,
     val expiresAtMillis: Long = System.currentTimeMillis() + expiresIn * 1000
 ) {
-    fun accessTokenIsValid(nowMillis: Long = System.currentTimeMillis()) = expiresAtMillis > nowMillis + 5_000
+    fun accessTokenIsValid(nowMillis: Long = System.currentTimeMillis()) = accessToken.isNotBlank() && expiresAtMillis > nowMillis + 5_000
 }
 
 class SessionExpiredException : IllegalStateException()
 class CorruptedLocalCredentialException(cause: Throwable) : IllegalStateException(cause)
 
-enum class SessionClearReason { INVALID_REFRESH, REVOKED_SESSION, CORRUPTED_LOCAL_CREDENTIAL }
+enum class SessionClearReason { REVOKED_SESSION, CORRUPTED_LOCAL_CREDENTIAL }
+
+/** Invalid credentials do not prove that the device session was revoked. */
+class SessionRecoveryException(cause: Throwable) : IllegalStateException(cause)
 
 /** A transient refresh failure. The encrypted session must be retained for retry. */
 class SessionRefreshUnavailableException(cause: Throwable) : IllegalStateException(cause)

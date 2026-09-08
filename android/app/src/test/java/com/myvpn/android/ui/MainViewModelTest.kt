@@ -136,7 +136,7 @@ class MainViewModelTest {
         assertEquals("PREMIUM", (vm.state.value as MainUiState.Ready).access.entitlement)
     }
 
-    @Test fun confirmedInvalidRefreshReturnsPhoneEntry() = runTest {
+    @Test fun confirmedRevokedSessionReturnsPhoneEntry() = runTest {
         val auth = FakeAuth(restored = null)
         val vm = viewModel(auth, FakeAccess())
         advanceUntilIdle()
@@ -154,6 +154,19 @@ class MainViewModelTest {
         vm.retry()
         advanceUntilIdle()
 
+        assertTrue(vm.state.value is MainUiState.Ready)
+        assertEquals(2, auth.restoreCalls)
+    }
+
+    @Test fun invalidRefreshShowsSessionErrorAndRetryRestoresWithoutPhoneEntry() = runTest {
+        val auth = FakeAuth(restored = session(), restoreFailures = mutableListOf(
+            com.myvpn.android.data.SessionRecoveryException(IllegalStateException())))
+        val vm = viewModel(auth, FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)))
+        advanceUntilIdle()
+        assertEquals(AppError.SESSION_RECOVERY_FAILED, (vm.state.value as MainUiState.Error).type)
+        assertEquals("Не удалось восстановить сессию", (vm.state.value as MainUiState.Error).message)
+        vm.retry()
+        advanceUntilIdle()
         assertTrue(vm.state.value is MainUiState.Ready)
         assertEquals(2, auth.restoreCalls)
     }

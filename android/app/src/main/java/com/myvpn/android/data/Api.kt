@@ -39,27 +39,23 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionS
     private val mutex = Mutex()
     @Volatile private var currentSession: Session? = null
 
-    override suspend fun restoreSession(): Session? {
+    override suspend fun restoreSession(): Session? = mutex.withLock {
         val saved = loadPersistedSession() ?: run {
+            currentSession = null
             log("Auth restore: refreshPresent=false result=MISSING_OR_CORRUPTED_CREDENTIAL")
-            return null
+            return@withLock null
         }
-        log("Auth restore: accessPresent=${saved.accessToken.isNotBlank()} accessExpired=${!saved.accessTokenIsValid()} refreshPresent=true")
-        if (saved.accessTokenIsValid()) return saved.also { currentSession = it }
-        return mutex.withLock {
-            val latest = currentSession?.takeIf { it.accessTokenIsValid() }
-                ?: loadPersistedSession()?.takeIf { it.accessTokenIsValid() }
-            latest?.also { currentSession = it } ?: refresh(loadPersistedSession() ?: return@withLock null)
-        }
+        log("AUTH_STARTUP ${if (saved.accessTokenIsValid()) "ACCESS_VALID" else "ACCESS_EXPIRED"} accessPresent=${saved.accessToken.isNotBlank()}")
+        if (saved.accessTokenIsValid()) saved.also { currentSession = it } else refresh(saved)
     }
 
     override suspend fun startVerification(phone: String) = api.startPhone(PhoneVerificationStartRequest(phone))
     override suspend fun verificationStatus(verificationId: String) = api.phoneStatus(verificationId)
-    override suspend fun exchange(verificationId: String, exchangeToken: String): Session {
+    override suspend fun exchange(verificationId: String, exchangeToken: String): Session = mutex.withLock {
         val response = api.exchangePhone(PhoneVerificationExchangeRequest(verificationId, exchangeToken))
-        return Session(response.accessToken, response.refreshToken, response.expiresIn, response.accountId, response.accessStatus, response.accessExpiresAt).also { session ->
-            currentSession = session
+        Session(response.accessToken, response.refreshToken, response.expiresIn, response.accountId, response.accessStatus, response.accessExpiresAt).also { session ->
             store.save(session)
+            currentSession = session
         }
     }
 
@@ -79,52 +75,58 @@ class PhoneAuthRepository(private val api: MyVpnApi, private val store: SessionS
         (refresh(saved) ?: throw SessionExpiredException()).accessToken
     }
 
-    private suspend fun refresh(previous: Session): Session? = try {
-        log("Refresh attempted")
+    private suspend fun refresh(previous: Session, reconcile: Boolean = true): Session? = try {
+        log("REFRESH_ATTEMPT")
         val response = api.refresh(RefreshRequest(previous.refreshToken))
         if (response.accessToken.isBlank() || response.refreshToken.isBlank()) {
             throw SessionRefreshUnavailableException(IllegalStateException("Refresh response has missing credentials"))
         }
         Session(response.accessToken, response.refreshToken, response.expiresIn, previous.accountId, previous.accessStatus, previous.accessExpiresAt).also { session ->
-            currentSession = session
             store.save(session)
-            log("Refresh result=SUCCESS")
+            currentSession = session
+            log("REFRESH_SUCCESS")
         }
     } catch (exception: HttpException) {
-        val reason = confirmedInvalidReason(exception)
-        if (reason != null) {
-            log("Refresh result=$reason")
+        val code = refreshErrorCode(exception)
+        if (code == "SESSION_REVOKED") {
+            log("SESSION_REVOKED")
             currentSession = null
-            store.clear(reason)
+            store.clear(SessionClearReason.REVOKED_SESSION)
             null
+        } else if (code == "REFRESH_TOKEN_INVALID" || code == "REFRESH_TOKEN_REVOKED") {
+            // Reconcile with durable storage before retrying. Never discard an
+            // unrecognised credential: only the session endpoint can prove revoke.
+            log("REFRESH_INVALID")
+            val persisted = loadPersistedSession()
+            if (reconcile && persisted != null && persisted.refreshToken != previous.refreshToken) {
+                currentSession = persisted
+                if (persisted.accessTokenIsValid()) persisted else refresh(persisted, reconcile = false)
+            } else throw SessionRecoveryException(exception)
         } else {
-            log("Refresh result=TRANSIENT_HTTP_${exception.code()}")
+            log("REFRESH_TRANSIENT_ERROR status=${exception.code()}")
             throw SessionRefreshUnavailableException(exception)
         }
     } catch (exception: java.io.IOException) {
-        log("Refresh result=TRANSPORT_${exception::class.java.simpleName}")
+        log("REFRESH_TRANSIENT_ERROR transport=${exception::class.java.simpleName}")
         throw SessionRefreshUnavailableException(exception)
     }
 
     private suspend fun loadPersistedSession(): Session? = try {
-        store.session()
+        store.session()?.also {
+            if (it.refreshToken.isBlank()) throw CorruptedLocalCredentialException(IllegalStateException("Empty local credential"))
+        }
     } catch (failure: CorruptedLocalCredentialException) {
         currentSession = null
         store.clear(SessionClearReason.CORRUPTED_LOCAL_CREDENTIAL)
         null
     }
 
-    private fun confirmedInvalidReason(exception: HttpException): SessionClearReason? {
+    private fun refreshErrorCode(exception: HttpException): String? {
         if (exception.code() != 401 && exception.code() != 403) return null
-        val code = runCatching {
+        return runCatching {
             authErrorJson.decodeFromString<AuthErrorResponse>(
                 exception.response()?.errorBody()?.string().orEmpty())
         }.getOrNull()?.code
-        return when (code) {
-            "REFRESH_TOKEN_INVALID" -> SessionClearReason.INVALID_REFRESH
-            "REFRESH_TOKEN_REVOKED", "SESSION_REVOKED" -> SessionClearReason.REVOKED_SESSION
-            else -> null
-        }
     }
 
     private fun log(message: String) {
@@ -146,7 +148,7 @@ class VpnAccessRepository(private val api: MyVpnApi, private val auth: PhoneAuth
         return try {
             api.access("Bearer $token")
         } catch (exception: HttpException) {
-            if (exception.code() != 401) throw exception
+            if (exception.code() != 401 && exception.code() != 403) throw exception
             api.access("Bearer ${auth.refreshAfterUnauthorized(token)}")
         }
     }

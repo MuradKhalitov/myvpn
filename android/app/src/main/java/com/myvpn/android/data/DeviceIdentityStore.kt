@@ -56,10 +56,19 @@ class DeviceIdentityStore(private val context: Context) : SessionStore {
             Session(accessToken, refreshToken, 0,
                 preferences[accountId], preferences[accessStatus], preferences[accessExpiresAt],
                 preferences[expiresAt] ?: 0)
-        } catch (failure: RuntimeException) {
+        } catch (failure: IllegalArgumentException) {
+            throw CorruptedLocalCredentialException(failure)
+        } catch (failure: java.nio.BufferUnderflowException) {
+            throw CorruptedLocalCredentialException(failure)
+        } catch (failure: javax.crypto.BadPaddingException) {
+            throw CorruptedLocalCredentialException(failure)
+        } catch (failure: android.security.keystore.KeyPermanentlyInvalidatedException) {
+            throw CorruptedLocalCredentialException(failure)
+        } catch (failure: java.security.UnrecoverableKeyException) {
             throw CorruptedLocalCredentialException(failure)
         } catch (failure: java.security.GeneralSecurityException) {
-            throw CorruptedLocalCredentialException(failure)
+            // Keystore/provider availability failures do not prove corruption.
+            throw java.io.IOException("Credential storage temporarily unavailable", failure)
         }
     }
 
@@ -75,7 +84,7 @@ class DeviceIdentityStore(private val context: Context) : SessionStore {
     }
 
     override suspend fun clear(reason: SessionClearReason) {
-        android.util.Log.i("MyVpnAuth", "Session cleared: reason=$reason")
+        android.util.Log.i("MyVpnAuth", "SESSION_CLEAR reason=$reason")
         context.ds.edit { it.remove(access); it.remove(refresh); it.remove(accountId); it.remove(accessStatus); it.remove(accessExpiresAt); it.remove(expiresAt) }
     }
 
@@ -88,5 +97,14 @@ class DeviceIdentityStore(private val context: Context) : SessionStore {
         }.generateKey()
     }
     private fun encrypt(value: String): String { val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key()); val encrypted = cipher.doFinal(value.toByteArray()); return Base64.encodeToString(ByteBuffer.allocate(4 + cipher.iv.size + encrypted.size).putInt(cipher.iv.size).put(cipher.iv).put(encrypted).array(), Base64.NO_WRAP) }
-    private fun decrypt(value: String): String { val bytes = Base64.decode(value, Base64.NO_WRAP); val size = ByteBuffer.wrap(bytes).int; val iv = bytes.copyOfRange(4, 4 + size); val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv)); return String(cipher.doFinal(bytes.copyOfRange(4 + size, bytes.size))) }
+    private fun decrypt(value: String): String {
+        val bytes = Base64.decode(value, Base64.NO_WRAP)
+        require(bytes.size >= 4 + 12 + 16) { "Invalid encrypted credential length" }
+        val size = ByteBuffer.wrap(bytes).int
+        require(size == 12) { "Invalid encrypted credential IV" }
+        val iv = bytes.copyOfRange(4, 4 + size)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, iv))
+        return String(cipher.doFinal(bytes.copyOfRange(4 + size, bytes.size)))
+    }
 }
