@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily MyVPN PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+Unit=myvpn-postgres-backup.service
+
+[Install]
+WantedBy=timers.target
