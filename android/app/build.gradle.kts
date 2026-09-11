@@ -56,6 +56,10 @@ android {
             buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
         }
         release {
+            // Keep production APK arm64-only; debug retains all ABIs for emulators.
+            ndk {
+                abiFilters += "arm64-v8a"
+            }
             isMinifyEnabled = false
             buildConfigField("String", "API_BASE_URL", "\"https://api.myvpn05.ru/\"")
             signingConfig = signingConfigs.findByName("release")
