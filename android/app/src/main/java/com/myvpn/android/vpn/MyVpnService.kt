@@ -6,65 +6,34 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.core.app.NotificationCompat
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class MyVpnService : VpnService() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val mutex = Mutex()
-    private var session = VpnServiceSession { LibXrayCoreEngine(GomobileLibXrayBridge()) }
+    private val lifecycle = VpnServiceLifecycle(
+        session = VpnServiceSession { LibXrayCoreEngine(GomobileLibXrayBridge()) },
+        mutex = mutex,
+        establishTun = ::establishTun,
+        protect = { fd -> protect(fd.toInt()) },
+        promoteForeground = { startForeground(NOTIFICATION_ID, notification()) },
+        removeForeground = { stopForeground(STOP_FOREGROUND_REMOVE) },
+        stopService = { startId -> stopSelfResult(startId) },
+        updateState = VpnConnectionStore::update
+    )
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_CONNECT -> intent.getStringExtra(EXTRA_CONFIGURATION)?.let { connect(it) }
-            ACTION_DISCONNECT -> disconnect()
+            ACTION_CONNECT -> intent.getStringExtra(EXTRA_CONFIGURATION)?.let { lifecycle.connect(it, startId) }
+            ACTION_DISCONNECT -> lifecycle.disconnect(startId)
         }
         return START_NOT_STICKY
     }
 
-    private fun connect(configuration: String) = scope.launch {
-        mutex.withLock {
-            if (VpnConnectionStore.state.value is VpnConnectionState.Connecting || session.active) return@withLock
-            VpnConnectionStore.update(VpnConnectionState.Connecting)
-            startForeground(NOTIFICATION_ID, notification())
-            try {
-                check(session.connect(configuration, ::establishTun) { fd -> protect(fd.toInt()) })
-                VpnConnectionStore.update(VpnConnectionState.Connected)
-            } catch (_: Exception) {
-                cleanupLocked()
-                VpnConnectionStore.update(VpnConnectionState.Failed("VPN connection could not be started"))
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
-            }
-        }
-    }
-
-    private fun disconnect() = scope.launch {
-        mutex.withLock {
-            if (!session.active) { VpnConnectionStore.update(VpnConnectionState.Disconnected); stopSelf(); return@withLock }
-            VpnConnectionStore.update(VpnConnectionState.Disconnecting)
-            cleanupLocked()
-            VpnConnectionStore.update(VpnConnectionState.Disconnected)
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-        }
-    }
-
-    private fun cleanupLocked() {
-        session.cleanup()
-    }
-
-    override fun onDestroy() { cleanupLocked(); VpnConnectionStore.update(VpnConnectionState.Disconnected); super.onDestroy() }
+    override fun onDestroy() { lifecycle.destroy(); super.onDestroy() }
 
     override fun onRevoke() {
-        disconnect()
+        lifecycle.destroy()
         super.onRevoke()
     }
 
@@ -82,6 +51,8 @@ class MyVpnService : VpnService() {
     override fun onCreate() { super.onCreate(); (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel(CHANNEL_ID, "MyVPN VPN", NotificationManager.IMPORTANCE_LOW)) }
 
     companion object {
+        // libXray is process-wide: old-service cleanup must finish before a new start.
+        private val mutex = Mutex()
         private const val ACTION_CONNECT = "com.myvpn.android.vpn.CONNECT"
         private const val ACTION_DISCONNECT = "com.myvpn.android.vpn.DISCONNECT"
         private const val EXTRA_CONFIGURATION = "com.myvpn.android.vpn.CONFIGURATION"
