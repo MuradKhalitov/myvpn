@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily MyVPN 3x-ui backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+Unit=myvpn-x-ui-backup.service
+
+[Install]
+WantedBy=timers.target
