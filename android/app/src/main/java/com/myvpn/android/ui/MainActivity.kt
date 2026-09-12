@@ -125,12 +125,14 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -
         Text("MyVPN", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(32.dp))
         when (state) {
-            MainUiState.Initializing, MainUiState.Authenticated, MainUiState.Connecting, MainUiState.Disconnecting, MainUiState.AwaitingPermission -> Loading("Проверяем сессию")
+            MainUiState.Initializing, MainUiState.Authenticated, MainUiState.AwaitingPermission -> Loading("Проверяем сессию")
+            is MainUiState.Connecting -> VpnTransition("Подключаем VPN", state.message, vm, disconnecting = false)
+            is MainUiState.Disconnecting -> VpnTransition("Отключаем VPN", state.message, vm, disconnecting = true)
             is MainUiState.PhoneEntry -> PhoneEntry(state, vm)
             is MainUiState.PhoneVerification -> PhoneVerification(state, vm, onDial)
             is MainUiState.VpnProvisioning -> Loading("Настраиваем VPN")
             is MainUiState.Ready -> VpnScreen(state.access, state.session, connected = false, state.message, vm, onShare)
-            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, null, vm, onShare)
+            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, state.message, vm, onShare)
             is MainUiState.Expired -> ExpiredScreen(state.message, vm, onShare)
             is MainUiState.Error -> ErrorScreen(state, vm)
         }
@@ -185,14 +187,24 @@ private fun PhoneVerification(state: MainUiState.PhoneVerification, vm: MainView
 }
 
 @Composable
-private fun VpnScreen(access: VpnAccessResponse, session: Session, connected: Boolean, message: String?, vm: MainViewModel, onShare: () -> Unit) {
+private fun VpnScreen(access: VpnAccessResponse?, session: Session?, connected: Boolean, message: String?, vm: MainViewModel, onShare: () -> Unit) {
     ConnectionHeader(connected)
     Spacer(Modifier.height(28.dp))
-    EntitlementCard(access, session)
+    if (access != null && session != null) EntitlementCard(access, session)
     message?.let { Text(it, modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.error) }
     Spacer(Modifier.height(32.dp))
-    Button(onClick = { if (connected) vm.disconnect() else vm.connect() }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (connected) "Отключить VPN" else "Подключить VPN") }
+    Button(onClick = { if (connected) vm.disconnect() else vm.connect() }, enabled = connected || !access?.configuration.isNullOrBlank(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (connected) "Отключить VPN" else "Подключить VPN") }
     AppFooter(onShare)
+}
+
+@Composable
+private fun VpnTransition(title: String, message: String?, vm: MainViewModel, disconnecting: Boolean) {
+    Loading(title)
+    message?.let { Text(it, modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.error) }
+    Spacer(Modifier.height(32.dp))
+    Button(onClick = { vm.disconnect() }, enabled = !disconnecting, modifier = Modifier.fillMaxWidth()) {
+        Text("Отключить VPN")
+    }
 }
 
 @Composable

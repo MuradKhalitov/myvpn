@@ -36,9 +36,27 @@ sealed interface MainUiState {
     data class Expired(val message: String = "Срок доступа закончился. Выберите тариф, чтобы продолжить.") : MainUiState
     data class Error(val type: AppError, val message: String, val retryable: Boolean) : MainUiState
     data object AwaitingPermission : MainUiState
-    data object Connecting : MainUiState
-    data class Connected(val access: VpnAccessResponse, val session: Session) : MainUiState
-    data object Disconnecting : MainUiState
+    data class Connecting(val message: String? = null) : MainUiState
+    data class Connected(val access: VpnAccessResponse? = null, val session: Session? = null, val message: String? = null) : MainUiState
+    data class Disconnecting(val message: String? = null) : MainUiState
+}
+
+/** Backend state remains available after stop; it never hides an active engine. */
+private fun withEngineState(backend: MainUiState, connection: VpnConnectionState): MainUiState {
+    val detail = when (backend) {
+        is MainUiState.Error -> backend.message
+        is MainUiState.PhoneEntry -> backend.validationMessage ?: "Войдите по номеру телефона"
+        is MainUiState.VpnProvisioning -> "Настраиваем VPN"
+        is MainUiState.Expired -> backend.message
+        else -> null
+    }?.let { "Данные доступа: $it" }
+    val ready = backend as? MainUiState.Ready
+    return when (connection) {
+        VpnConnectionState.Connected -> MainUiState.Connected(ready?.access, ready?.session, detail)
+        VpnConnectionState.Connecting -> MainUiState.Connecting(detail)
+        VpnConnectionState.Disconnecting -> MainUiState.Disconnecting(detail)
+        else -> backend
+    }
 }
 
 class MainViewModel(
@@ -48,8 +66,13 @@ class MainViewModel(
     private val pollDelayMillis: Long = 2_000,
     private val now: () -> Instant = Instant::now
 ) : ViewModel() {
-    private val _state = MutableStateFlow<MainUiState>(MainUiState.Initializing)
+    private val _state = MutableStateFlow(withEngineState(MainUiState.Initializing, engine.state.value))
     val state = _state.asStateFlow()
+    private var backendState: MainUiState = MainUiState.Initializing
+        set(value) {
+            field = value
+            _state.value = withEngineState(value, engine.state.value)
+        }
     private data class ActivePhoneVerification(
         val canonicalPhone: String,
         val response: PhoneVerificationStartResponse
@@ -77,22 +100,24 @@ class MainViewModel(
         viewModelScope.launch {
             engine.state.collect { connection ->
                 when (connection) {
-                    VpnConnectionState.Connected -> ready?.let(::renderVpnState)
-                    VpnConnectionState.Connecting -> _state.value = MainUiState.Connecting
-                    VpnConnectionState.Disconnecting -> _state.value = MainUiState.Disconnecting
-                    VpnConnectionState.Disconnected -> ready?.let(::renderVpnState)
-                    VpnConnectionState.PermissionDenied -> ready?.let { current -> session?.let { _state.value = MainUiState.Ready(current, it, "Разрешение VPN не предоставлено") } }
-                    is VpnConnectionState.Failed -> ready?.let { current -> session?.let { _state.value = MainUiState.Ready(current, it, "Не удалось подключить VPN") } }
+                    VpnConnectionState.PermissionDenied -> ready?.let { current -> session?.let { backendState = MainUiState.Ready(current, it, "Разрешение VPN не предоставлено") } }
+                    is VpnConnectionState.Failed -> ready?.let { current -> session?.let { backendState = MainUiState.Ready(current, it, "Не удалось подключить VPN") } }
+                    else -> if (backendState is MainUiState.Connecting) {
+                        ready?.let(::renderVpnState)
+                    }
                 }
+                _state.value = withEngineState(backendState, engine.state.value)
             }
         }
     }
 
     fun restoreAuth() {
         pollingJob?.cancel(); vpnJob?.cancel()
+        configuration = null
+        ready = null
         val attempt = ++restoreAttempt
         AuthDiagnostics.event("AUTH_RESTORE_STARTED", "attempt=$attempt")
-        _state.value = MainUiState.Initializing
+        backendState = MainUiState.Initializing
         viewModelScope.launch {
             val restored = try {
                 auth.restoreSession()
@@ -101,22 +126,22 @@ class MainViewModel(
                 throw failure
             } catch (failure: SessionRefreshUnavailableException) {
                 AuthDiagnostics.event("AUTH_RESTORE_FINISHED", "attempt=$attempt result=ERROR category=${AuthDiagnostics.category(failure)}")
-                _state.value = errorFor(failure.cause ?: failure, AppError.SESSION_EXPIRED)
+                backendState = errorFor(failure.cause ?: failure, AppError.SESSION_EXPIRED)
                 return@launch
             } catch (failure: Throwable) {
                 AuthDiagnostics.event("AUTH_RESTORE_FINISHED", "attempt=$attempt result=ERROR category=${AuthDiagnostics.category(failure)}")
-                _state.value = errorFor(failure, AppError.SESSION_EXPIRED)
+                backendState = errorFor(failure, AppError.SESSION_EXPIRED)
                 return@launch
             }
             AuthDiagnostics.event("AUTH_RESTORE_FINISHED", "attempt=$attempt result=${if (restored == null) "NO_SESSION" else "SUCCESS"}")
             if (restored == null) {
                 safeAuthLog("Auth restore result=LOCAL_MISSING_CORRUPTED_OR_REVOKED")
                 session = null
-                _state.value = MainUiState.PhoneEntry()
+                backendState = MainUiState.PhoneEntry()
             } else {
                 safeAuthLog("Auth restore result=AUTHENTICATED")
                 session = restored
-                _state.value = MainUiState.Authenticated
+                backendState = MainUiState.Authenticated
                 loadVpn()
             }
         }
@@ -125,7 +150,7 @@ class MainViewModel(
     fun startPhoneVerification(phone: String) {
         val canonicalPhone = PhoneNumberInputFormatter.fromUserInput(phone).canonical
         if (!isPhoneValid(canonicalPhone)) {
-            _state.value = MainUiState.PhoneEntry("Введите номер в формате +7 999 123-45-67")
+            backendState = MainUiState.PhoneEntry("Введите номер в формате +7 999 123-45-67")
             return
         }
         val existing = activeVerification
@@ -133,7 +158,7 @@ class MainViewModel(
             activeVerification = null
         } else if (existing?.canonicalPhone == canonicalPhone) {
             stopPhoneVerificationPolling()
-            _state.value = MainUiState.PhoneVerification(existing.response, waitingForCall = true)
+            backendState = MainUiState.PhoneVerification(existing.response, waitingForCall = true)
             return
         }
         viewModelScope.launch {
@@ -141,9 +166,9 @@ class MainViewModel(
                 .onSuccess { started ->
                     activeVerification = ActivePhoneVerification(canonicalPhone, started)
                     exchangeStarted = false
-                    _state.value = MainUiState.PhoneVerification(started, waitingForCall = true)
+                    backendState = MainUiState.PhoneVerification(started, waitingForCall = true)
                 }
-                .onFailure { _state.value = phoneStartErrorFor(it) }
+                .onFailure { backendState = phoneStartErrorFor(it) }
         }
     }
 
@@ -152,17 +177,17 @@ class MainViewModel(
         val active = activeVerification ?: return
         if (!active.isPendingAt(now())) {
             activeVerification = null
-            _state.value = MainUiState.Error(AppError.VERIFICATION_EXPIRED, "Время подтверждения звонка истекло", true)
+            backendState = MainUiState.Error(AppError.VERIFICATION_EXPIRED, "Время подтверждения звонка истекло", true)
             return
         }
         val current = active.response
         if (pollingJob?.isActive == true || exchangeStarted) return
         pollingJob = viewModelScope.launch {
-            _state.value = MainUiState.PhoneVerification(current, waitingForCall = false, message = "Ожидаем подтверждение звонка")
+            backendState = MainUiState.PhoneVerification(current, waitingForCall = false, message = "Ожидаем подтверждение звонка")
             while (isActive && !exchangeStarted) {
                 val status = runCatching { auth.verificationStatus(current.verificationId) }
                 val response = status.getOrElse {
-                    _state.value = errorFor(it, AppError.BACKEND_UNAVAILABLE)
+                    backendState = errorFor(it, AppError.BACKEND_UNAVAILABLE)
                     return@launch
                 }
                 if (response.status == "EXPIRED" || response.status == "FAILED") activeVerification = null
@@ -171,7 +196,7 @@ class MainViewModel(
                         "VERIFIED" -> {
                             val exchangeToken = response.exchangeToken
                             if (exchangeToken.isNullOrBlank()) {
-                                _state.value = MainUiState.Error(AppError.EXCHANGE_FAILED, "Подтверждение не содержит токен входа", true)
+                                backendState = MainUiState.Error(AppError.EXCHANGE_FAILED, "Подтверждение не содержит токен входа", true)
                             } else {
                                 exchangeStarted = true
                                 activeVerification = null
@@ -179,9 +204,9 @@ class MainViewModel(
                             }
                             return@launch
                         }
-                        "EXPIRED" -> { _state.value = MainUiState.Error(AppError.VERIFICATION_EXPIRED, "Время подтверждения звонка истекло", true); return@launch }
-                        "FAILED" -> { _state.value = MainUiState.Error(AppError.VERIFICATION_FAILED, "Не удалось подтвердить звонок", true); return@launch }
-                        else -> { _state.value = MainUiState.Error(AppError.BACKEND_UNAVAILABLE, "Получен неизвестный статус подтверждения", true); return@launch }
+                        "EXPIRED" -> { backendState = MainUiState.Error(AppError.VERIFICATION_EXPIRED, "Время подтверждения звонка истекло", true); return@launch }
+                        "FAILED" -> { backendState = MainUiState.Error(AppError.VERIFICATION_FAILED, "Не удалось подтвердить звонок", true); return@launch }
+                        else -> { backendState = MainUiState.Error(AppError.BACKEND_UNAVAILABLE, "Получен неизвестный статус подтверждения", true); return@launch }
                 }
             }
         }
@@ -192,7 +217,7 @@ class MainViewModel(
 
     fun changePhoneNumber() {
         stopPhoneVerificationPolling()
-        _state.value = MainUiState.PhoneEntry()
+        backendState = MainUiState.PhoneEntry()
     }
 
     private fun exchange(verificationId: String, exchangeToken: String) {
@@ -200,20 +225,20 @@ class MainViewModel(
             runCatching { auth.exchange(verificationId, exchangeToken) }
                 .onSuccess { authenticated ->
                     session = authenticated
-                    _state.value = MainUiState.Authenticated
+                    backendState = MainUiState.Authenticated
                     loadVpn()
                 }
-                .onFailure { _state.value = errorFor(it, AppError.EXCHANGE_FAILED) }
+                .onFailure { backendState = errorFor(it, AppError.EXCHANGE_FAILED) }
         }
     }
 
     fun retry() {
-        AuthDiagnostics.event("AUTH_RETRY_CLICKED", "state=${_state.value::class.java.simpleName}")
-        when (val current = _state.value) {
-            is MainUiState.PhoneEntry -> _state.value = MainUiState.PhoneEntry()
+        AuthDiagnostics.event("AUTH_RETRY_CLICKED", "state=${backendState::class.java.simpleName}")
+        when (val current = backendState) {
+            is MainUiState.PhoneEntry -> backendState = MainUiState.PhoneEntry()
             is MainUiState.PhoneVerification -> onReturnedFromDialer()
             is MainUiState.Error -> when (current.type) {
-                AppError.VERIFICATION_EXPIRED, AppError.VERIFICATION_FAILED -> { activeVerification = null; exchangeStarted = false; _state.value = MainUiState.PhoneEntry() }
+                AppError.VERIFICATION_EXPIRED, AppError.VERIFICATION_FAILED -> { activeVerification = null; exchangeStarted = false; backendState = MainUiState.PhoneEntry() }
                 AppError.EXCHANGE_FAILED -> { exchangeStarted = false; onReturnedFromDialer() }
                 AppError.SESSION_EXPIRED, AppError.SESSION_RECOVERY_FAILED, AppError.NETWORK_UNAVAILABLE, AppError.BACKEND_UNAVAILABLE -> restoreAuth()
                 else -> restoreAuth()
@@ -224,6 +249,9 @@ class MainViewModel(
 
     private fun loadVpn() {
         vpnJob?.cancel()
+        configuration = null
+        ready = null
+        backendState = MainUiState.Authenticated
         vpnJob = viewModelScope.launch {
             AuthDiagnostics.event("VPN_LOAD_STARTED")
             while (isActive) {
@@ -233,14 +261,14 @@ class MainViewModel(
                     AuthDiagnostics.event("VPN_LOAD_FINISHED", "result=ERROR category=${AuthDiagnostics.category(failure)}")
                     if (failure is SessionExpiredException) {
                             session = null
-                            _state.value = MainUiState.PhoneEntry("Сессия истекла. Войдите по номеру телефона.")
-                    } else _state.value = errorFor(failure, AppError.VPN_PROVISIONING_FAILED)
+                            backendState = MainUiState.PhoneEntry("Сессия истекла. Войдите по номеру телефона.")
+                    } else backendState = errorFor(failure, AppError.VPN_PROVISIONING_FAILED)
                     return@launch
                 }
                 AuthDiagnostics.event("VPN_LOAD_FINISHED", "result=SUCCESS")
                 when (vpn.status) {
                             "READY" -> {
-                                if (vpn.entitlement == "EXPIRED") _state.value = MainUiState.Expired()
+                                if (vpn.entitlement == "EXPIRED") backendState = MainUiState.Expired()
                                 else {
                                     configuration = vpn.configuration
                                     ready = vpn
@@ -248,8 +276,8 @@ class MainViewModel(
                                 }
                                 return@launch
                             }
-                            "RETRY_REQUIRED" -> { _state.value = MainUiState.Error(AppError.VPN_PROVISIONING_FAILED, "Настройка VPN требует повторной попытки", true); return@launch }
-                            else -> { _state.value = MainUiState.VpnProvisioning(vpn.entitlement); delay(pollDelayMillis) }
+                            "RETRY_REQUIRED" -> { backendState = MainUiState.Error(AppError.VPN_PROVISIONING_FAILED, "Настройка VPN требует повторной попытки", true); return@launch }
+                            else -> { backendState = MainUiState.VpnProvisioning(vpn.entitlement); delay(pollDelayMillis) }
                 }
             }
         }
@@ -257,30 +285,30 @@ class MainViewModel(
 
     fun connect() {
         if (engine.state.value is VpnConnectionState.Connected
-            || engine.state.value is VpnConnectionState.Connecting) return
-        if (configuration != null) _state.value = MainUiState.AwaitingPermission
+            || engine.state.value is VpnConnectionState.Connecting
+            || engine.state.value is VpnConnectionState.Disconnecting) return
+        if (backendState is MainUiState.Ready && !configuration.isNullOrBlank() && session != null) {
+            backendState = MainUiState.AwaitingPermission
+        }
     }
     fun onPermissionResult(granted: Boolean) {
         val currentConfiguration = configuration
         val currentReady = ready
-        if (!granted) { if (currentReady != null && session != null) _state.value = MainUiState.Ready(currentReady, session!!, "Разрешение VPN не предоставлено"); return }
-        if (currentConfiguration != null
+        if (!granted) { if (currentReady != null && session != null) backendState = MainUiState.Ready(currentReady, session!!, "Разрешение VPN не предоставлено"); return }
+        if (!currentConfiguration.isNullOrBlank() && session != null && currentReady != null
+            && backendState is MainUiState.AwaitingPermission
             && engine.state.value !is VpnConnectionState.Connected
-            && engine.state.value !is VpnConnectionState.Connecting) viewModelScope.launch {
-            _state.value = MainUiState.Connecting
-            runCatching { engine.start(currentConfiguration) }.onFailure { if (currentReady != null && session != null) _state.value = MainUiState.Ready(currentReady, session!!, "Не удалось подключить VPN") }
+            && engine.state.value !is VpnConnectionState.Connecting
+            && engine.state.value !is VpnConnectionState.Disconnecting) viewModelScope.launch {
+            backendState = MainUiState.Connecting()
+            runCatching { engine.start(currentConfiguration) }.onFailure { session?.let { backendState = MainUiState.Ready(currentReady, it, "Не удалось подключить VPN") } }
         }
     }
-    fun disconnect() = viewModelScope.launch { _state.value = MainUiState.Disconnecting; engine.stop() }
+    fun disconnect() = viewModelScope.launch { engine.stop() }
 
     private fun renderVpnState(access: VpnAccessResponse) {
         val authenticated = session ?: return
-        _state.value = when (engine.state.value) {
-            VpnConnectionState.Connected -> MainUiState.Connected(access, authenticated)
-            VpnConnectionState.Connecting -> MainUiState.Connecting
-            VpnConnectionState.Disconnecting -> MainUiState.Disconnecting
-            else -> MainUiState.Ready(access, authenticated)
-        }
+        backendState = MainUiState.Ready(access, authenticated)
     }
 
     override fun onCleared() { stopPhoneVerificationPolling(); vpnJob?.cancel(); super.onCleared() }

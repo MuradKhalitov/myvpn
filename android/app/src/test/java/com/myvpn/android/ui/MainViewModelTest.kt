@@ -323,7 +323,166 @@ class MainViewModelTest {
         advanceUntilIdle(); vm.startPhoneVerification("+79991234567"); advanceUntilIdle()
         return vm
     }
-    private fun viewModel(auth: FakeAuth, access: FakeAccess, engine: FakeEngine = FakeEngine()) = MainViewModel(auth, access, engine, 2_000) { Instant.parse("2026-09-01T00:00:00Z") }
+    @Test fun connectedIsVisibleImmediatelyBeforeAuthAndConfigLoad() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(session()), FakeAccess(), engine)
+        assertTrue(vm.state.value is MainUiState.Connected)
+        advanceUntilIdle()
+        val connected = vm.state.value as MainUiState.Connected
+        assertEquals(CONFIG, connected.access?.configuration)
+        assertEquals(null, connected.message)
+        assertEquals(0, engine.startCalls)
+    }
+
+    @Test fun connectedSurvivesAccessNetworkFailureAndCanDisconnect() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(session()), failingAccess(IOException()), engine)
+        advanceUntilIdle()
+        val connected = vm.state.value as MainUiState.Connected
+        assertEquals(null, connected.access)
+        assertTrue(connected.message!!.contains("Нет подключения к сети"))
+        vm.connect(); vm.onPermissionResult(true)
+        advanceUntilIdle()
+        assertEquals(0, engine.startCalls)
+        vm.disconnect()
+        advanceUntilIdle()
+        assertEquals(1, engine.stopCalls)
+        assertEquals(AppError.NETWORK_UNAVAILABLE, (vm.state.value as MainUiState.Error).type)
+    }
+
+    @Test fun connectedSurvivesAccessServerError() = runTest {
+        val failure = HttpException(Response.error<VpnAccessResponse>(503, "{}".toResponseBody("application/json".toMediaType())))
+        val vm = viewModel(FakeAuth(session()), failingAccess(failure), FakeEngine(VpnConnectionState.Connected))
+        advanceUntilIdle()
+        assertTrue((vm.state.value as MainUiState.Connected).message!!.contains("Сервис временно недоступен"))
+    }
+
+    @Test fun coldRestartWithRefreshTimeoutStillAllowsStop() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(session(), restoreFailures = mutableListOf(
+            SessionRefreshUnavailableException(java.net.SocketTimeoutException()))), FakeAccess(), engine)
+        advanceUntilIdle()
+        assertTrue((vm.state.value as MainUiState.Connected).message!!.contains("Нет подключения к сети"))
+        vm.disconnect()
+        advanceUntilIdle()
+        assertEquals(1, engine.stopCalls)
+        assertTrue(vm.state.value is MainUiState.Error)
+    }
+
+    @Test fun connectedWithoutRestoredAuthStillAllowsStop() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(null), FakeAccess(), engine)
+        advanceUntilIdle()
+        assertTrue((vm.state.value as MainUiState.Connected).message!!.contains("Войдите"))
+        vm.disconnect()
+        advanceUntilIdle()
+        assertEquals(1, engine.stopCalls)
+        assertTrue(vm.state.value is MainUiState.PhoneEntry)
+    }
+
+    @Test fun connectedWithProvisioningFailureStillAllowsStop() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(session()), FakeAccess(VpnAccessResponse("RETRY_REQUIRED", "TRIAL", null)), engine)
+        advanceUntilIdle()
+        assertTrue((vm.state.value as MainUiState.Connected).message!!.contains("повторной попытки"))
+        vm.disconnect()
+        advanceUntilIdle()
+        assertEquals(1, engine.stopCalls)
+        assertEquals(AppError.VPN_PROVISIONING_FAILED, (vm.state.value as MainUiState.Error).type)
+    }
+
+    @Test fun pendingProvisioningDoesNotHideConnected() = runTest {
+        val vm = viewModel(FakeAuth(session()), FakeAccess(
+            VpnAccessResponse("PROVISIONING", "TRIAL", null)), FakeEngine(VpnConnectionState.Connected))
+        runCurrent()
+        assertTrue((vm.state.value as MainUiState.Connected).message!!.contains("Настраиваем VPN"))
+        advanceUntilIdle()
+        assertEquals(null, (vm.state.value as MainUiState.Connected).message)
+    }
+
+    @Test fun disconnectedWithBackendErrorCannotStart() = runTest {
+        val engine = FakeEngine()
+        val vm = viewModel(FakeAuth(session()), failingAccess(IOException()), engine)
+        advanceUntilIdle()
+        vm.connect(); vm.onPermissionResult(true)
+        advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Error)
+        assertEquals(0, engine.startCalls)
+    }
+
+    @Test fun normalReadyConnectAndDisconnectFlowIsPreserved() = runTest {
+        val engine = FakeEngine()
+        val vm = viewModel(FakeAuth(session()), FakeAccess(), engine)
+        advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Ready)
+        vm.connect(); runCurrent()
+        assertTrue(vm.state.value is MainUiState.AwaitingPermission)
+        vm.onPermissionResult(true); advanceUntilIdle()
+        assertEquals(1, engine.startCalls)
+        assertTrue(vm.state.value is MainUiState.Connecting)
+        engine.emit(VpnConnectionState.Connected); runCurrent()
+        assertEquals(CONFIG, (vm.state.value as MainUiState.Connected).access?.configuration)
+        vm.disconnect(); advanceUntilIdle()
+        assertEquals(1, engine.stopCalls)
+        assertTrue(vm.state.value is MainUiState.Ready)
+    }
+
+    @Test fun transitionalEngineStatesSurviveBackendError() = runTest {
+        val engine = FakeEngine(VpnConnectionState.Connecting)
+        val vm = viewModel(FakeAuth(session()), failingAccess(IOException()), engine)
+        assertTrue(vm.state.value is MainUiState.Connecting)
+        advanceUntilIdle()
+        assertTrue((vm.state.value as MainUiState.Connecting).message!!.contains("Нет подключения"))
+        vm.connect(); vm.onPermissionResult(true); runCurrent()
+        assertEquals(0, engine.startCalls)
+        vm.disconnect(); advanceUntilIdle()
+        assertEquals(1, engine.stopCalls)
+        val stopping = viewModel(FakeAuth(session()), failingAccess(IOException()), FakeEngine(VpnConnectionState.Disconnecting))
+        assertTrue(stopping.state.value is MainUiState.Disconnecting)
+        advanceUntilIdle()
+        assertTrue((stopping.state.value as MainUiState.Disconnecting).message!!.contains("Нет подключения"))
+    }
+
+    @Test fun failedEngineIsNotShownAsActive() = runTest {
+        val vm = viewModel(FakeAuth(session()), failingAccess(IOException()), FakeEngine(VpnConnectionState.Failed("failed")))
+        advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Error)
+    }
+
+    @Test fun emptyConfigurationCannotStartNewVpn() = runTest {
+        val engine = FakeEngine()
+        val vm = viewModel(FakeAuth(session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", "")), engine)
+        advanceUntilIdle()
+        vm.connect(); vm.onPermissionResult(true); advanceUntilIdle()
+        assertEquals(0, engine.startCalls)
+        assertTrue(vm.state.value is MainUiState.Ready)
+    }
+
+    @Test fun failedRefreshDoesNotReusePreviouslyReadyConfigAfterStop() = runTest {
+        var fail = false
+        val access = object : VpnAccessSource {
+            override suspend fun current(): VpnAccessResponse {
+                if (fail) throw IOException()
+                return VpnAccessResponse("READY", "TRIAL", CONFIG)
+            }
+        }
+        val engine = FakeEngine(VpnConnectionState.Connected)
+        val vm = viewModel(FakeAuth(session()), access, engine)
+        advanceUntilIdle()
+        fail = true
+        vm.retry(); advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Connected)
+        vm.disconnect(); advanceUntilIdle()
+        vm.connect(); vm.onPermissionResult(true); advanceUntilIdle()
+        assertTrue(vm.state.value is MainUiState.Error)
+        assertEquals(0, engine.startCalls)
+    }
+
+    private fun failingAccess(failure: Throwable) = object : VpnAccessSource {
+        override suspend fun current(): VpnAccessResponse = throw failure
+    }
+
+    private fun viewModel(auth: FakeAuth, access: VpnAccessSource, engine: FakeEngine = FakeEngine()) = MainViewModel(auth, access, engine, 2_000) { Instant.parse("2026-09-01T00:00:00Z") }
     private fun session(accessStatus: String = "TRIAL") = Session("access", "refresh", 3600, "account", accessStatus, "2026-09-10T00:00:00Z")
 
     private class FakeAuth(
