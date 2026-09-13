@@ -6,6 +6,11 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -13,6 +18,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -63,10 +71,25 @@ class MainActivity : ComponentActivity() {
         val permission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { viewModel?.onPermissionResult(it.resultCode == Activity.RESULT_OK) }
         val dialer = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { viewModel?.onReturnedFromDialer() }
         setContent {
-            val vm = remember { MainViewModel(app.phoneAuth, app.access, app.engine) }
+            val vm = viewModel<MainViewModel>(factory = viewModelFactory {
+                initializer { MainViewModel(app.phoneAuth, app.access, app.engine, payments = app.payments) }
+            })
             val updateVm = remember { UpdateViewModel(app.appVersion, BuildConfig.VERSION_CODE) }
             DisposableEffect(Unit) { viewModel = vm; onDispose { viewModel = null } }
             val state by vm.state.collectAsState()
+            DisposableEffect(vm) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) vm.onPaymentReturned()
+                }
+                lifecycle.addObserver(observer)
+                onDispose { lifecycle.removeObserver(observer) }
+            }
+            LaunchedEffect((state as? MainUiState.Tariffs)?.checkoutUrl) {
+                vm.consumeCheckoutUrl()?.let { url ->
+                    runCatching { startActivity(checkoutIntent(url) ?: error("Invalid checkout URL")) }
+                        .onFailure { vm.checkoutOpenFailed() }
+                }
+            }
             val updateDecision by updateVm.decision.collectAsState()
             LaunchedEffect(state) { if (state is MainUiState.AwaitingPermission) VpnService.prepare(this@MainActivity)?.let(permission::launch) ?: vm.onPermissionResult(true) }
             MaterialTheme {
@@ -95,6 +118,8 @@ internal fun dialRequest(callPhone: String) = DialRequest(Intent.ACTION_DIAL, "t
 internal fun dialIntent(callPhone: String): Intent = dialRequest(callPhone).let { Intent(it.action, Uri.parse(it.uri)) }
 internal fun updateUrl(apkUrl: String): String? = apkUrl.takeIf(UpdatePolicy::isHttpsUrl)
 internal fun updateIntent(apkUrl: String): Intent? = updateUrl(apkUrl)?.let { Intent(Intent.ACTION_VIEW, Uri.parse(it)) }
+internal fun checkoutIntent(url: String): Intent? =
+    if (com.myvpn.android.data.validCheckoutUrl(url)) updateIntent(url) else null
 
 @Composable
 private fun UpdateDialog(decision: UpdateDecision, onLater: () -> Unit, onUpdate: (String) -> Unit) {
@@ -132,8 +157,9 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -
             is MainUiState.PhoneVerification -> PhoneVerification(state, vm, onDial)
             is MainUiState.VpnProvisioning -> Loading("Настраиваем VPN")
             is MainUiState.Ready -> VpnScreen(state.access, state.session, connected = false, state.message, vm, onShare)
-            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, state.message, vm, onShare)
+            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, state.message, vm, onShare, retryable = state.retryable)
             is MainUiState.Expired -> ExpiredScreen(state.message, vm, onShare)
+            is MainUiState.Tariffs -> TariffScreen(state, vm)
             is MainUiState.Error -> ErrorScreen(state, vm)
         }
     }
@@ -187,14 +213,32 @@ private fun PhoneVerification(state: MainUiState.PhoneVerification, vm: MainView
 }
 
 @Composable
-private fun VpnScreen(access: VpnAccessResponse?, session: Session?, connected: Boolean, message: String?, vm: MainViewModel, onShare: () -> Unit) {
+private fun VpnScreen(access: VpnAccessResponse?, session: Session?, connected: Boolean, message: String?, vm: MainViewModel, onShare: () -> Unit, retryable: Boolean = false) {
     ConnectionHeader(connected)
     Spacer(Modifier.height(28.dp))
     if (access != null && session != null) EntitlementCard(access, session)
     message?.let { Text(it, modifier = Modifier.padding(top = 16.dp), color = MaterialTheme.colorScheme.error) }
+    if (retryable) OutlinedButton(onClick = vm::retry) { Text("Повторить") }
+    Spacer(Modifier.height(16.dp))
+    val payment by vm.paymentCheck.collectAsState()
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        tariffActionLabel(access)?.let { label ->
+            OutlinedButton(onClick = vm::openTariffs, enabled = !payment.busy,
+                modifier = Modifier.weight(1f).fillMaxHeight()) { Text(label, textAlign = TextAlign.Center) }
+        }
+        OutlinedButton(onClick = vm::checkPayment, enabled = !payment.busy,
+            modifier = Modifier.weight(1f).fillMaxHeight()) { Text("Проверить оплату", textAlign = TextAlign.Center) }
+    }
+    PaymentCheckMessage(payment)
     Spacer(Modifier.height(32.dp))
     Button(onClick = { if (connected) vm.disconnect() else vm.connect() }, enabled = connected || !access?.configuration.isNullOrBlank(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (connected) "Отключить VPN" else "Подключить VPN") }
     AppFooter(onShare)
+}
+
+internal fun tariffActionLabel(access: VpnAccessResponse?): String? = when (access?.entitlement) {
+    "TRIAL" -> "Выбрать тариф"
+    "PREMIUM" -> "Продлить доступ"
+    else -> null
 }
 
 @Composable
@@ -243,16 +287,25 @@ private fun EntitlementCard(access: VpnAccessResponse, session: Session) {
 
 @Composable
 private fun ExpiredScreen(message: String, vm: MainViewModel, onShare: () -> Unit) {
+    val payment by vm.paymentCheck.collectAsState()
     Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
         Column(Modifier.padding(24.dp)) {
             Text("Доступ закончился", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             Text("Выберите тариф, чтобы снова подключить VPN", color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(20.dp))
-            Button(onClick = vm::retry, modifier = Modifier.fillMaxWidth()) { Text("Выбрать тариф") }
+            Button(onClick = vm::openTariffs, modifier = Modifier.fillMaxWidth()) { Text("Выбрать тариф") }
+            OutlinedButton(onClick = vm::checkPayment, enabled = !payment.busy, modifier = Modifier.fillMaxWidth()) { Text("Проверить оплату") }
+            PaymentCheckMessage(payment)
         }
     }
     AppFooter(onShare)
+}
+
+@Composable
+private fun PaymentCheckMessage(payment: PaymentCheckState) {
+    if (payment.busy) Text("Проверяем оплату…", modifier = Modifier.padding(top = 12.dp))
+    payment.message?.let { Text(it, modifier = Modifier.padding(top = 12.dp)) }
 }
 
 @Composable

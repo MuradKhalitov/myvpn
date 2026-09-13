@@ -281,6 +281,9 @@ class PhoneAuthRepositoryTest {
         private val onRefresh: () -> Unit = {},
         private val simulateRotation: Boolean = false
     ) : MyVpnApi {
+        override suspend fun tariffs(bearer: String): List<TariffResponse> = error("Not used")
+        override suspend fun checkout(bearer: String, request: CreateCheckoutRequest): CheckoutResponse = error("Not used")
+        override suspend fun currentPayment(bearer: String): PaymentStatusResponse = error("Not used")
         var refreshCalls = 0
         var rotationCounter = 0
         private var currentRefresh = "old-refresh"

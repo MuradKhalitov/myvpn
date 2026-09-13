@@ -18,6 +18,9 @@ import retrofit2.http.Path
 private val authErrorJson = Json { ignoreUnknownKeys = true }
 
 interface MyVpnApi {
+    @GET("api/v1/tariffs") suspend fun tariffs(@Header("Authorization") bearer: String): List<TariffResponse>
+    @POST("api/v1/payments/checkout") suspend fun checkout(@Header("Authorization") bearer: String, @Body request: CreateCheckoutRequest): CheckoutResponse
+    @GET("api/v1/payments/current") suspend fun currentPayment(@Header("Authorization") bearer: String): PaymentStatusResponse
     // Kept only for backward compatibility with legacy DEVICE installations.
     @POST("api/v1/device/register") suspend fun register(@Body request: DeviceRegisterRequest): AuthResponse
     @POST("api/v1/auth/refresh") suspend fun refresh(@Body request: RefreshRequest): RefreshResponse
