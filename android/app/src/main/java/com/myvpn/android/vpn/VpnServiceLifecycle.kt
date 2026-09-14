@@ -32,23 +32,38 @@ internal class VpnServiceLifecycle(
     @Volatile private var stopping = false
     private var cleanupJob: Job? = null
 
-    fun connect(configuration: String, startId: Int): Job? = submit {
-        if (session.active) return@submit
-        updateState(VpnConnectionState.Connecting)
+    /** Called inline by onStartCommand: promotion must precede dispatch and the native mutex. */
+    @Synchronized
+    fun connect(configuration: String, startId: Int): Job? {
         try {
             promoteForeground()
-            currentCoroutineContext().ensureActive()
-            check(session.connect(configuration, establishTun, protect))
-            // Native start is synchronous: cancellation cannot interrupt it safely.
-            currentCoroutineContext().ensureActive()
-            updateState(VpnConnectionState.Connected)
-        } catch (cancelled: CancellationException) {
-            throw cancelled // destroy owns the serialized final cleanup
         } catch (_: Exception) {
-            session.cleanup()
-            if (!destroyed) {
-                updateState(VpnConnectionState.Failed("VPN connection could not be started"))
-                finish(startId)
+            updateState(VpnConnectionState.Failed("VPN connection could not be started"))
+            // A failed promotion cannot wait for native cleanup to satisfy Android's deadline.
+            finish(startId)
+            return destroy()
+        }
+        if (destroyed || stopping) {
+            finish(startId)
+            return null
+        }
+        return submit {
+            if (session.active) return@submit
+            updateState(VpnConnectionState.Connecting)
+            try {
+                currentCoroutineContext().ensureActive()
+                check(session.connect(configuration, establishTun, protect))
+                // Native start is synchronous: cancellation cannot interrupt it safely.
+                currentCoroutineContext().ensureActive()
+                updateState(VpnConnectionState.Connected)
+            } catch (cancelled: CancellationException) {
+                throw cancelled // destroy owns the serialized final cleanup
+            } catch (_: Exception) {
+                session.cleanup()
+                if (!destroyed) {
+                    updateState(VpnConnectionState.Failed("VPN connection could not be started"))
+                    finish(startId)
+                }
             }
         }
     }
@@ -60,12 +75,13 @@ internal class VpnServiceLifecycle(
         finish(startId)
     }
 
+    @Synchronized
     private fun finish(startId: Int) {
-        try {
+        // Share the short command-delivery monitor with immediate promotion. An older
+        // Disconnect must neither stop nor demote a newer delivered Connect.
+        if (stopService(startId)) {
+            stopping = true
             removeForeground()
-        } finally {
-            // An older Disconnect must not stop a newer delivered Connect.
-            if (stopService(startId)) stopping = true
         }
     }
 

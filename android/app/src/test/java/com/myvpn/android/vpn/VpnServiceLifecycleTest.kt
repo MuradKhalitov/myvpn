@@ -29,7 +29,7 @@ class VpnServiceLifecycleTest {
         assertTrue(f.session.active)
         f.disconnect(2)
         advanceUntilIdle()
-        assertEquals(listOf("foreground", "tun", "run", "stop", "close", "remove", "finish:2:true"), f.events)
+        assertEquals(listOf("foreground", "tun", "run", "stop", "close", "finish:2:true", "remove"), f.events)
         assertEquals(listOf(VpnConnectionState.Connecting, VpnConnectionState.Connected,
             VpnConnectionState.Disconnecting, VpnConnectionState.Disconnected), f.states)
         assertFalse(f.session.active)
@@ -40,6 +40,7 @@ class VpnServiceLifecycleTest {
         val f = Fixture(StandardTestDispatcher(testScheduler))
         f.connect(1)
         f.connect(2)
+        assertEquals(listOf("foreground", "foreground"), f.events)
         advanceUntilIdle()
         assertEquals(1, f.events.count { it == "tun" })
         assertEquals(1, f.events.count { it == "run" })
@@ -66,9 +67,9 @@ class VpnServiceLifecycleTest {
         f.connect(1)
         f.disconnect(2)
         // Submission must not execute native work inline on the caller thread.
-        assertTrue(f.events.isEmpty())
+        assertEquals(listOf("foreground"), f.events)
         advanceUntilIdle()
-        assertEquals(listOf("foreground", "tun", "run", "stop", "close", "remove", "finish:2:true"), f.events)
+        assertEquals(listOf("foreground", "tun", "run", "stop", "close", "finish:2:true", "remove"), f.events)
         assertFalse(f.session.active)
         f.lifecycle.destroy().join()
     }
@@ -80,8 +81,8 @@ class VpnServiceLifecycleTest {
         f.disconnect(2)
         f.connect(3)
         advanceUntilIdle()
-        assertEquals(listOf("foreground", "tun", "run", "stop", "close", "remove", "finish:2:false",
-            "foreground", "tun", "run"), f.events)
+        assertEquals(listOf("foreground", "tun", "run", "foreground", "stop", "close", "finish:2:false",
+            "tun", "run"), f.events)
         assertTrue(f.session.active)
         assertEquals(VpnConnectionState.Connected, f.states.last())
         f.lifecycle.destroy().join()
@@ -121,7 +122,7 @@ class VpnServiceLifecycleTest {
         assertTrue(first.isCancelled)
         assertTrue(second.isCancelled)
         assertTrue(disconnect.isCancelled)
-        assertEquals(listOf("remove"), f.events)
+        assertEquals(listOf("foreground", "foreground", "remove"), f.events)
         assertEquals(listOf(VpnConnectionState.Disconnected), f.states)
         assertFalse(f.session.active)
     }
@@ -129,9 +130,10 @@ class VpnServiceLifecycleTest {
     @Test fun foregroundFailureEndsInFailedAndStopsService() = runTest {
         val f = Fixture(StandardTestDispatcher(testScheduler), failForeground = true)
         f.connect(1)
-        advanceUntilIdle()
-        assertEquals(listOf("foreground", "remove", "finish:1:true"), f.events)
         assertTrue(f.states.last() is VpnConnectionState.Failed)
+        assertTrue(f.events.contains("finish:1:true"))
+        advanceUntilIdle()
+        assertEquals(listOf("foreground", "finish:1:true", "remove", "remove"), f.events)
         assertFalse(f.session.active)
         f.lifecycle.destroy().join()
         assertEquals(VpnConnectionState.Disconnected, f.states.last())
@@ -141,7 +143,7 @@ class VpnServiceLifecycleTest {
         val f = Fixture(StandardTestDispatcher(testScheduler), onRun = { error("native start failed") })
         f.connect(1)
         advanceUntilIdle()
-        assertEquals(listOf("foreground", "tun", "run", "stop", "close", "remove", "finish:1:true"), f.events)
+        assertEquals(listOf("foreground", "tun", "run", "stop", "close", "finish:1:true", "remove"), f.events)
         assertTrue(f.states.last() is VpnConnectionState.Failed)
         assertFalse(f.session.active)
         f.lifecycle.destroy().join()
@@ -156,6 +158,7 @@ class VpnServiceLifecycleTest {
         })
         val connect = f.connect(1)!!
         try {
+            assertEquals("foreground", f.events.first())
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             val queued = f.disconnect(2)!!
             val cleanup = f.lifecycle.destroy()
@@ -167,7 +170,8 @@ class VpnServiceLifecycleTest {
             awaitWorkerJobs(cleanup, connect, queued)
             assertTrue(connect.isCancelled)
             assertTrue(queued.isCancelled)
-            assertEquals(listOf("foreground", "tun", "run", "stop", "close", "remove"), f.events)
+            assertEquals(listOf("foreground", "tun", "run", "foreground", "finish:3:true", "remove",
+                "stop", "close", "remove"), f.events)
             assertFalse(f.states.contains(VpnConnectionState.Connected))
             assertEquals(VpnConnectionState.Disconnected, f.states.last())
             assertFalse(f.session.active)
@@ -193,11 +197,64 @@ class VpnServiceLifecycleTest {
             val cleanup = old.lifecycle.destroy()
             val restarted = replacement.connect(1)!!
             assertFalse(restarted.isCompleted)
+            assertEquals(2, events.count { it == "foreground" })
             release.countDown()
             awaitWorkerJobs(cleanup, restarted)
-            assertEquals(listOf("foreground", "tun", "run", "stop", "close", "remove",
-                "foreground", "tun", "run"), events)
+            assertEquals(listOf("foreground", "tun", "run", "foreground", "stop", "close", "remove",
+                "tun", "run"), events)
             assertFalse(old.session.active)
+            assertTrue(replacement.session.active)
+        } finally {
+            release.countDown()
+            awaitWorkerJobs(old.lifecycle.destroy(), replacement.lifecycle.destroy())
+        }
+    }
+
+    @Test fun foregroundDoesNotWaitForMutexOrCoroutineDispatch() = runTest {
+        val mutex = Mutex(locked = true)
+        val f = Fixture(StandardTestDispatcher(testScheduler), mutex = mutex)
+        val connect = f.connect(1)!!
+        assertEquals(listOf("foreground"), f.events)
+        assertFalse(connect.isCompleted)
+        advanceUntilIdle()
+        assertEquals(listOf("foreground"), f.events)
+        mutex.unlock()
+        advanceUntilIdle()
+        assertEquals(listOf("foreground", "tun", "run"), f.events)
+        f.lifecycle.destroy().join()
+    }
+
+    @Test fun promotionFailureStopsImmediatelyEvenWhenMutexIsHeld() = runTest {
+        val mutex = Mutex(locked = true)
+        val f = Fixture(StandardTestDispatcher(testScheduler), mutex = mutex, failForeground = true)
+        val cleanup = f.connect(1)!!
+        assertTrue(f.events.contains("finish:1:true"))
+        assertTrue(f.states.last() is VpnConnectionState.Failed)
+        assertFalse(cleanup.isCompleted)
+        assertFalse(f.events.contains("tun"))
+        mutex.unlock()
+        cleanup.join()
+        assertFalse(f.session.active)
+    }
+
+    @Test fun replacementPromotesWhileOldCleanupIsBlockedInsideNativeStop() = runTest {
+        val mutex = Mutex()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val old = Fixture(Dispatchers.IO, mutex = mutex, onStop = {
+            entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+        })
+        val replacement = Fixture(Dispatchers.IO, mutex = mutex)
+        awaitWorkerJobs(old.connect(1)!!)
+        try {
+            val cleanup = old.lifecycle.destroy()
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            val connect = replacement.connect(1)!!
+            assertEquals(listOf("foreground"), replacement.events)
+            assertFalse(connect.isCompleted)
+            release.countDown()
+            awaitWorkerJobs(cleanup, connect)
             assertTrue(replacement.session.active)
         } finally {
             release.countDown()
@@ -215,7 +272,8 @@ class VpnServiceLifecycleTest {
         mutex: Mutex = Mutex(),
         val events: MutableList<String> = Collections.synchronizedList(mutableListOf()),
         failForeground: Boolean = false,
-        onRun: () -> Unit = {}
+        onRun: () -> Unit = {},
+        onStop: () -> Unit = {}
     ) {
         val states: MutableList<VpnConnectionState> = Collections.synchronizedList(mutableListOf())
         @Volatile private var latestStartId = 0
@@ -225,7 +283,7 @@ class VpnServiceLifecycleTest {
                 override fun registerSocketProtection(protect: (Long) -> Boolean) = Unit
                 override fun initDns(protect: (Long) -> Boolean, server: String) = Unit
                 override fun runXrayFromJson(config: String) { events += "run"; onRun() }
-                override fun stopXray() { events += "stop" }
+                override fun stopXray() { events += "stop"; onStop() }
                 override fun isRunning() = true
                 override fun resetDns() = Unit
             })

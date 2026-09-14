@@ -11,20 +11,30 @@ import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.sync.Mutex
 
 class MyVpnService : VpnService() {
+    private var selectionError: String? = null
     private val lifecycle = VpnServiceLifecycle(
         session = VpnServiceSession { LibXrayCoreEngine(GomobileLibXrayBridge()) },
         mutex = mutex,
         establishTun = ::establishTun,
         protect = { fd -> protect(fd.toInt()) },
-        promoteForeground = { startForeground(NOTIFICATION_ID, notification()) },
-        removeForeground = { stopForeground(STOP_FOREGROUND_REMOVE) },
+        promoteForeground = ::ensureForeground,
+        removeForeground = ::removeOwnedForeground,
         stopService = { startId -> stopSelfResult(startId) },
-        updateState = VpnConnectionStore::update
+        updateState = { state ->
+            if (state is VpnConnectionState.Connecting) selectionError = null
+            VpnConnectionStore.update(if (state is VpnConnectionState.Failed && selectionError != null)
+                VpnConnectionState.Failed(selectionError!!) else state)
+            if (state is VpnConnectionState.Connected) foregroundOwnership.update(this) {
+                (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                    .notify(NOTIFICATION_ID, notification("VPN connected"))
+            }
+        }
     )
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            ACTION_CONNECT -> intent.getStringExtra(EXTRA_CONFIGURATION)?.let { lifecycle.connect(it, startId) }
+            // connect promotes synchronously before it submits any coroutine/native work.
+            ACTION_CONNECT -> lifecycle.connect(intent.getStringExtra(EXTRA_CONFIGURATION).orEmpty(), startId)
             ACTION_DISCONNECT -> lifecycle.disconnect(startId)
         }
         return START_NOT_STICKY
@@ -37,14 +47,41 @@ class MyVpnService : VpnService() {
         super.onRevoke()
     }
 
-    private fun establishTun(): TunHandle? = Builder().setSession("MyVPN").setMtu(1400)
-        .addAddress("10.8.0.2", 32).addRoute("0.0.0.0", 0)
-        .addAddress("fd00:8::2", 128).addRoute("::", 0)
-        .addDnsServer("1.1.1.1").establish()?.let(::ParcelTunHandle)
+    private fun establishTun(): TunHandle? {
+        selectionError = null
+        val builder = Builder().setSession("MyVPN").setMtu(1400)
+            .addAddress("10.8.0.2", 32).addRoute("0.0.0.0", 0)
+            .addAddress("fd00:8::2", 128).addRoute("::", 0)
+            .addDnsServer("1.1.1.1")
+        val selection = (application as com.myvpn.android.MyVpnApplication).vpnAppSelectionStore.get()
+        try {
+            applyVpnAppSelection(selection) { packageName ->
+                try {
+                    builder.addAllowedApplication(packageName)
+                    true
+                } catch (_: android.content.pm.PackageManager.NameNotFoundException) { false }
+            }
+        } catch (failure: NoSelectedAppsException) {
+            selectionError = NO_SELECTED_APPS_MESSAGE
+            throw failure
+        }
+        return builder.establish()?.let(::ParcelTunHandle)
+    }
 
-    private fun notification() = NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun ensureForeground() = foregroundOwnership.promote(this) {
+        // Reusing the ID updates one notification, including repeated CONNECT commands.
+        startForeground(NOTIFICATION_ID, notification(if (VpnConnectionStore.state.value is VpnConnectionState.Connected)
+            "VPN connected" else "Подключение VPN"))
+    }
+
+    private fun removeOwnedForeground() = foregroundOwnership.remove(this) {
+        // Old service cleanup may finish after a replacement has already promoted.
+        stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    private fun notification(text: String) = NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(android.R.drawable.stat_sys_warning).setContentTitle("MyVPN")
-        .setContentText("VPN connected").setOngoing(true)
+        .setContentText(text).setOngoing(true)
         .addAction(0, "Disconnect", PendingIntent.getService(this, 0, disconnectIntent(this), PendingIntent.FLAG_IMMUTABLE))
         .build()
 
@@ -53,6 +90,7 @@ class MyVpnService : VpnService() {
     companion object {
         // libXray is process-wide: old-service cleanup must finish before a new start.
         private val mutex = Mutex()
+        private val foregroundOwnership = VpnForegroundOwnership()
         private const val ACTION_CONNECT = "com.myvpn.android.vpn.CONNECT"
         private const val ACTION_DISCONNECT = "com.myvpn.android.vpn.DISCONNECT"
         private const val EXTRA_CONFIGURATION = "com.myvpn.android.vpn.CONFIGURATION"

@@ -122,7 +122,8 @@ class MainViewModel(
             engine.state.collect { connection ->
                 when (connection) {
                     VpnConnectionState.PermissionDenied -> ready?.let { current -> session?.let { backendState = MainUiState.Ready(current, it, "Разрешение VPN не предоставлено") } }
-                    is VpnConnectionState.Failed -> ready?.let { current -> session?.let { backendState = MainUiState.Ready(current, it, "Не удалось подключить VPN") } }
+                    is VpnConnectionState.Failed -> ready?.let { current -> session?.let { backendState = MainUiState.Ready(current, it,
+                        if (connection.message == com.myvpn.android.vpn.NO_SELECTED_APPS_MESSAGE) connection.message else "Не удалось подключить VPN") } }
                     else -> if (backendState is MainUiState.Connecting) {
                         ready?.let(::renderVpnState)
                     }

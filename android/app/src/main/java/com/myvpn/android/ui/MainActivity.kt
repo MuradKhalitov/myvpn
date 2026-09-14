@@ -14,6 +14,8 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -75,6 +77,10 @@ class MainActivity : ComponentActivity() {
                 initializer { MainViewModel(app.phoneAuth, app.access, app.engine, payments = app.payments) }
             })
             val updateVm = remember { UpdateViewModel(app.appVersion, BuildConfig.VERSION_CODE) }
+            val appsVm = viewModel<AppSelectionViewModel>(factory = viewModelFactory {
+                initializer { AppSelectionViewModel(app.vpnAppSelectionStore, app.launchableApps) }
+            })
+            val appsState by appsVm.state.collectAsState()
             DisposableEffect(Unit) { viewModel = vm; onDispose { viewModel = null } }
             val state by vm.state.collectAsState()
             DisposableEffect(vm) {
@@ -95,9 +101,10 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Box {
-                        MainScreen(
+                        if (appsState.open) AppSelectionScreen(appsState, appsVm) else MainScreen(
                             state = state,
                             vm = vm,
+                            appsVm = appsVm,
                             onDial = { callPhone -> dialer.launch(dialIntent(callPhone)) },
                             onShare = { AppSharing.shareApp(this@MainActivity) }
                         )
@@ -145,8 +152,11 @@ private fun UpdateDialog(decision: UpdateDecision, onLater: () -> Unit, onUpdate
 }
 
 @Composable
-private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -> Unit, onShare: () -> Unit) {
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+private fun MainScreen(state: MainUiState, vm: MainViewModel, appsVm: AppSelectionViewModel, onDial: (String) -> Unit, onShare: () -> Unit) {
+    val scroll = rememberScrollState()
+    val contentModifier = if (state is MainUiState.Ready || state is MainUiState.Connected)
+        Modifier.verticalScroll(scroll) else Modifier
+    Column(modifier = Modifier.fillMaxSize().then(contentModifier).padding(horizontal = 24.dp, vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Text("MyVPN", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(32.dp))
         when (state) {
@@ -156,8 +166,8 @@ private fun MainScreen(state: MainUiState, vm: MainViewModel, onDial: (String) -
             is MainUiState.PhoneEntry -> PhoneEntry(state, vm)
             is MainUiState.PhoneVerification -> PhoneVerification(state, vm, onDial)
             is MainUiState.VpnProvisioning -> Loading("Настраиваем VPN")
-            is MainUiState.Ready -> VpnScreen(state.access, state.session, connected = false, state.message, vm, onShare)
-            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, state.message, vm, onShare, retryable = state.retryable)
+            is MainUiState.Ready -> VpnScreen(state.access, state.session, connected = false, state.message, vm, onShare, appsVm)
+            is MainUiState.Connected -> VpnScreen(state.access, state.session, connected = true, state.message, vm, onShare, appsVm, retryable = state.retryable)
             is MainUiState.Expired -> ExpiredScreen(state.message, vm, onShare)
             is MainUiState.Tariffs -> TariffScreen(state, vm)
             is MainUiState.Error -> ErrorScreen(state, vm)
@@ -213,7 +223,7 @@ private fun PhoneVerification(state: MainUiState.PhoneVerification, vm: MainView
 }
 
 @Composable
-private fun VpnScreen(access: VpnAccessResponse?, session: Session?, connected: Boolean, message: String?, vm: MainViewModel, onShare: () -> Unit, retryable: Boolean = false) {
+private fun VpnScreen(access: VpnAccessResponse?, session: Session?, connected: Boolean, message: String?, vm: MainViewModel, onShare: () -> Unit, appsVm: AppSelectionViewModel, retryable: Boolean = false) {
     ConnectionHeader(connected)
     Spacer(Modifier.height(28.dp))
     if (access != null && session != null) EntitlementCard(access, session)
@@ -232,6 +242,9 @@ private fun VpnScreen(access: VpnAccessResponse?, session: Session?, connected: 
     PaymentCheckMessage(payment)
     Spacer(Modifier.height(32.dp))
     Button(onClick = { if (connected) vm.disconnect() else vm.connect() }, enabled = connected || !access?.configuration.isNullOrBlank(), modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (connected) "Отключить VPN" else "Подключить VPN") }
+    val appsState by appsVm.state.collectAsState()
+    androidx.compose.material3.TextButton(onClick = appsVm::open) { Text("Приложения через VPN") }
+    appsState.savedMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     AppFooter(onShare)
 }
 

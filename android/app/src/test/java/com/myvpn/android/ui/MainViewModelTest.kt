@@ -478,6 +478,16 @@ class MainViewModelTest {
         assertEquals(0, engine.startCalls)
     }
 
+    @Test fun missingSelectedAppsMessageSurvivesServiceCleanup() = runTest {
+        val engine = FakeEngine()
+        val vm = viewModel(FakeAuth(session()), FakeAccess(VpnAccessResponse("READY", "TRIAL", CONFIG)), engine)
+        advanceUntilIdle()
+        engine.emit(VpnConnectionState.Failed(com.myvpn.android.vpn.NO_SELECTED_APPS_MESSAGE)); runCurrent()
+        engine.emit(VpnConnectionState.Disconnected); runCurrent()
+        assertEquals(com.myvpn.android.vpn.NO_SELECTED_APPS_MESSAGE, (vm.state.value as MainUiState.Ready).message)
+        assertEquals(0, engine.startCalls)
+    }
+
     private fun failingAccess(failure: Throwable) = object : VpnAccessSource {
         override suspend fun current(): VpnAccessResponse = throw failure
     }
