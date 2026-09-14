@@ -21,6 +21,7 @@ class MyVpnService : VpnService() {
         removeForeground = ::removeOwnedForeground,
         stopService = { startId -> stopSelfResult(startId) },
         updateState = { state ->
+            diagnostic("STATE ${state::class.java.simpleName}")
             if (state is VpnConnectionState.Connecting) selectionError = null
             VpnConnectionStore.update(if (state is VpnConnectionState.Failed && selectionError != null)
                 VpnConnectionState.Failed(selectionError!!) else state)
@@ -32,22 +33,25 @@ class MyVpnService : VpnService() {
     )
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        diagnostic("COMMAND ${when (intent?.action) { ACTION_CONNECT -> "CONNECT"; ACTION_DISCONNECT -> "DISCONNECT"; else -> "OTHER" }} id=$startId")
         when (intent?.action) {
             // connect promotes synchronously before it submits any coroutine/native work.
-            ACTION_CONNECT -> lifecycle.connect(intent.getStringExtra(EXTRA_CONFIGURATION).orEmpty(), startId)
-            ACTION_DISCONNECT -> lifecycle.disconnect(startId)
+            ACTION_CONNECT -> diagnostic("CONNECT_SUBMITTED accepted=${lifecycle.connect(intent.getStringExtra(EXTRA_CONFIGURATION).orEmpty(), startId) != null}")
+            ACTION_DISCONNECT -> diagnostic("DISCONNECT_SUBMITTED accepted=${lifecycle.disconnect(startId) != null}")
         }
         return START_NOT_STICKY
     }
 
-    override fun onDestroy() { lifecycle.destroy(); super.onDestroy() }
+    override fun onDestroy() { diagnostic("DESTROY"); lifecycle.destroy(); super.onDestroy() }
 
     override fun onRevoke() {
+        diagnostic("REVOKE")
         lifecycle.destroy()
         super.onRevoke()
     }
 
     private fun establishTun(): TunHandle? {
+        diagnostic("TUN_BEGIN")
         selectionError = null
         val builder = Builder().setSession("MyVPN").setMtu(1400)
             .addAddress("10.8.0.2", 32).addRoute("0.0.0.0", 0)
@@ -65,16 +69,19 @@ class MyVpnService : VpnService() {
             selectionError = NO_SELECTED_APPS_MESSAGE
             throw failure
         }
-        return builder.establish()?.let(::ParcelTunHandle)
+        return builder.establish()?.let(::ParcelTunHandle).also { diagnostic("TUN_END established=${it != null}") }
     }
 
     private fun ensureForeground() = foregroundOwnership.promote(this) {
+        diagnostic("FOREGROUND_BEGIN")
         // Reusing the ID updates one notification, including repeated CONNECT commands.
         startForeground(NOTIFICATION_ID, notification(if (VpnConnectionStore.state.value is VpnConnectionState.Connected)
             "VPN connected" else "Подключение VPN"))
+        diagnostic("FOREGROUND_END")
     }
 
     private fun removeOwnedForeground() = foregroundOwnership.remove(this) {
+        diagnostic("FOREGROUND_REMOVE")
         // Old service cleanup may finish after a replacement has already promoted.
         stopForeground(STOP_FOREGROUND_REMOVE)
     }
@@ -84,6 +91,10 @@ class MyVpnService : VpnService() {
         .setContentText(text).setOngoing(true)
         .addAction(0, "Disconnect", PendingIntent.getService(this, 0, disconnectIntent(this), PendingIntent.FLAG_IMMUTABLE))
         .build()
+
+    private fun diagnostic(event: String) {
+        android.util.Log.i("MyVpnService", "instance=${System.identityHashCode(this)} $event")
+    }
 
     override fun onCreate() { super.onCreate(); (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(NotificationChannel(CHANNEL_ID, "MyVPN VPN", NotificationManager.IMPORTANCE_LOW)) }
 

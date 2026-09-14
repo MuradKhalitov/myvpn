@@ -88,16 +88,22 @@ class VpnServiceLifecycleTest {
         f.lifecycle.destroy().join()
     }
 
-    @Test fun acceptedStopRejectsWorkWhileWaitingForDestroy() = runTest {
+    @Test fun newerDeliveredConnectRestartsSameInstanceAfterAcceptedStop() = runTest {
         val f = Fixture(StandardTestDispatcher(testScheduler))
         f.connect(1)
         advanceUntilIdle()
         f.disconnect(2)
         advanceUntilIdle()
-        assertNull(f.connect(3))
-        assertNull(f.disconnect(4))
+        assertFalse(f.session.active)
+        assertTrue(f.connect(3) != null)
+        advanceUntilIdle()
+        assertTrue(f.session.active)
+        assertEquals(VpnConnectionState.Connected, f.states.last())
+        assertEquals(2, f.events.count { it == "run" })
+        f.disconnect(4)
+        advanceUntilIdle()
         f.lifecycle.destroy().join()
-        assertEquals(1, f.events.count { it == "run" })
+        assertEquals(2, f.events.count { it == "stop" })
     }
 
     @Test fun destroyAfterConnectCleansSessionAndRejectsNewCommands() = runTest {

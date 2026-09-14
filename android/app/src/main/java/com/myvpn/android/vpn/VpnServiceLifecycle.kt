@@ -43,10 +43,13 @@ internal class VpnServiceLifecycle(
             finish(startId)
             return destroy()
         }
-        if (destroyed || stopping) {
+        if (destroyed) {
             finish(startId)
             return null
         }
+        // stopSelfResult may succeed while Android still keeps this service instance
+        // alive. A later delivered CONNECT is a new start, not stale queued work.
+        stopping = false
         return submit {
             if (session.active) return@submit
             updateState(VpnConnectionState.Connecting)

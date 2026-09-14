@@ -437,6 +437,74 @@ class PaymentFlowTest {
         assertEquals(0, f.engine.stops)
     }
 
+    @Test fun browsingTariffsThenImmediateConnectMatchesDirectConnect() = runTest {
+        for (browse in listOf(false, true)) {
+            val f = Fixture(); f.access = VpnAccessResponse("READY", "PREMIUM", "same-config"); advanceUntilIdle()
+            val original = f.vm.state.value
+            if (browse) {
+                f.vm.openTariffs(); advanceUntilIdle(); f.vm.closeTariffs()
+                assertEquals(original, f.vm.state.value)
+            }
+            // No scheduler turn between Back and Connect/permission result.
+            f.vm.connect()
+            assertEquals(MainUiState.AwaitingPermission, f.vm.state.value)
+            f.vm.onPermissionResult(true); advanceUntilIdle()
+            assertEquals(listOf("same-config"), f.engine.configurations)
+            assertEquals(1, f.engine.starts)
+            assertEquals(1, f.accessCalls)
+            assertEquals(0, f.source.currentCalls)
+            assertTrue(f.source.checkoutCodes.isEmpty())
+            f.engine.state.value = VpnConnectionState.Connected; runCurrent()
+            assertEquals(f.access, (f.vm.state.value as MainUiState.Connected).access)
+        }
+    }
+
+    @Test fun browsingBackAndActivityResumeNeverChecksPayment() = runTest {
+        val f = Fixture(); f.access = VpnAccessResponse("READY", "PREMIUM", "config"); advanceUntilIdle()
+        f.vm.openTariffs(); advanceUntilIdle(); assertNull(f.vm.consumeCheckoutUrl())
+        f.vm.closeTariffs(); f.vm.onPaymentReturned(); advanceUntilIdle()
+        assertEquals(0, f.source.currentCalls)
+        assertTrue(f.source.checkoutCodes.isEmpty())
+        assertEquals(PaymentCheckState(), f.vm.paymentCheck.value)
+        assertEquals(f.access, (f.vm.state.value as MainUiState.Ready).access)
+    }
+
+    @Test fun backCancelsSuspendedTariffLoadWithoutBlockingImmediateConnect() = runTest {
+        val f = Fixture(); f.access = VpnAccessResponse("READY", "PREMIUM", "config"); advanceUntilIdle()
+        val gate = CompletableDeferred<Unit>(); f.source.tariffGate = gate
+        f.vm.openTariffs(); runCurrent(); assertTrue(f.screen().loading)
+        f.vm.closeTariffs(); f.vm.connect(); f.vm.onPermissionResult(true)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(1, f.engine.starts)
+        assertTrue(f.vm.state.value is MainUiState.Connecting)
+        assertEquals(0, f.source.currentCalls)
+        assertEquals(1, f.accessCalls)
+    }
+
+    @Test fun repeatedBrowseAndBackKeepsConfigurationAndEngineUsable() = runTest {
+        val f = Fixture(); f.access = VpnAccessResponse("READY", "PREMIUM", "config"); advanceUntilIdle()
+        repeat(5) {
+            f.vm.openTariffs(); advanceUntilIdle(); f.vm.closeTariffs()
+            assertEquals(f.access, (f.vm.state.value as MainUiState.Ready).access)
+        }
+        f.vm.connect(); f.vm.onPermissionResult(true); advanceUntilIdle()
+        assertEquals(1, f.engine.starts)
+        assertEquals(5, f.source.tariffCalls)
+        assertEquals(0, f.source.currentCalls)
+        assertEquals(1, f.accessCalls)
+    }
+
+    @Test fun backDuringLoadingThenImmediateReopenHasNoStaleJobGuard() = runTest {
+        val f = Fixture(); f.access = VpnAccessResponse("READY", "PREMIUM", "config"); advanceUntilIdle()
+        f.source.tariffGate = CompletableDeferred()
+        f.vm.openTariffs(); runCurrent(); f.vm.closeTariffs()
+        f.source.tariffGate = null
+        f.vm.openTariffs(); advanceUntilIdle()
+        assertEquals(f.source.items, f.screen().items)
+        f.vm.closeTariffs(); f.vm.connect(); f.vm.onPermissionResult(true); advanceUntilIdle()
+        assertEquals(1, f.engine.starts)
+    }
+
     private class Fixture {
         val source = FakePayments()
         var access = VpnAccessResponse("READY", "EXPIRED")
@@ -458,7 +526,8 @@ class PaymentFlowTest {
     private class Engine : VpnEngine {
         override val state = MutableStateFlow<VpnConnectionState>(VpnConnectionState.Disconnected)
         var starts = 0; var stops = 0
-        override suspend fun start(configuration: String) { starts++; state.value = VpnConnectionState.Connecting }
+        val configurations = mutableListOf<String>()
+        override suspend fun start(configuration: String) { starts++; configurations += configuration; state.value = VpnConnectionState.Connecting }
         override suspend fun stop() { stops++; state.value = VpnConnectionState.Disconnected }
     }
 
@@ -466,11 +535,12 @@ class PaymentFlowTest {
         var items = listOf(TariffResponse("id", "from-backend", "Backend name", durationDays = 42, price = BigDecimal("123.45"), currency = "RUB"))
         var tariffCalls = 0; var currentCalls = 0
         var currentGate: CompletableDeferred<Unit>? = null
+        var tariffGate: CompletableDeferred<Unit>? = null
         val checkoutCodes = mutableListOf<String>()
         var tariffFailure: Exception? = null; var checkoutFailure: Exception? = null; var currentFailure: Exception? = null
         var url = URL
         var status = PaymentStatusResponse("STILL_PENDING", paymentStatus = "PENDING", activationStatus = "NOT_READY")
-        override suspend fun tariffs(): List<TariffResponse> { tariffCalls++; tariffFailure?.let { throw it }; return items }
+        override suspend fun tariffs(): List<TariffResponse> { tariffCalls++; tariffGate?.await(); tariffFailure?.let { throw it }; return items }
         override suspend fun checkout(code: String): CheckoutResponse {
             checkoutCodes += code; checkoutFailure?.let { throw it }
             return CheckoutResponse("order", "Backend name", BigDecimal("123.45"), "RUB", 42, "PENDING", url)

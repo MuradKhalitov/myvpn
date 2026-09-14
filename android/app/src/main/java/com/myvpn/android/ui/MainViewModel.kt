@@ -20,6 +20,8 @@ import com.myvpn.android.vpn.VpnEngine
 import java.time.Instant
 import java.io.IOException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -107,7 +109,7 @@ class MainViewModel(
     private var exchangeStarted = false
     private var restoreAttempt = 0L
     private var paymentJob: Job? = null
-    private var tariffReturnState: MainUiState? = null
+    private var tariffOriginExpired: Boolean? = null
     private var paymentAccessRefreshPending = false
 
     init {
@@ -278,14 +280,16 @@ class MainViewModel(
         if (backendState !is MainUiState.Expired && backendState !is MainUiState.Tariffs
             && (backendState as? MainUiState.Ready)?.access?.entitlement !in listOf("TRIAL", "PREMIUM")) return
         if (paymentJob?.isActive == true) return
-        if (backendState !is MainUiState.Tariffs) tariffReturnState = backendState
+        if (backendState !is MainUiState.Tariffs) tariffOriginExpired = backendState is MainUiState.Expired
         backendState = MainUiState.Tariffs(loading = true)
         paymentJob = viewModelScope.launch {
             try {
                 val items = source.tariffs()
+                currentCoroutineContext().ensureActive()
                 backendState = MainUiState.Tariffs(items, message = if (items.isEmpty()) "Тарифы пока недоступны" else null)
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (failure: Exception) {
+                currentCoroutineContext().ensureActive()
                 backendState = MainUiState.Tariffs(message = paymentError(failure, "Не удалось загрузить тарифы"))
             }
         }
@@ -295,10 +299,22 @@ class MainViewModel(
         val current = backendState as? MainUiState.Tariffs ?: return
         // Do not cancel an in-flight payment check or restore a snapshot after activation.
         if (current.busy) return
-        val previous = tariffReturnState ?: return
+        val wasExpired = tariffOriginExpired ?: return
         paymentJob?.cancel()
-        tariffReturnState = null
-        backendState = previous
+        paymentJob = null
+        tariffOriginExpired = null
+        if (!current.awaitingPayment) {
+            awaitingBrowserReturn = false
+            _paymentCheck.value = PaymentCheckState()
+        }
+        // Rebuild from current access/session and let the setter project live engine state.
+        val currentAccess = ready
+        when {
+            currentAccess != null && session != null -> renderVpnState(currentAccess)
+            wasExpired -> backendState = MainUiState.Expired()
+            session != null -> loadVpn()
+            else -> restoreAuth()
+        }
     }
 
     fun chooseTariff(code: String) {
@@ -347,7 +363,7 @@ class MainViewModel(
                 val payment = source.current()
                 if (payment.paymentStatus == "SUCCEEDED" && payment.activationStatus == "ACTIVATED") {
                     // Access/config, not the redirect URL, decides whether Connect is available.
-                    tariffReturnState = null
+                    tariffOriginExpired = null
                     paymentAccessRefreshPending = true
                     loadVpn()
                 } else {
